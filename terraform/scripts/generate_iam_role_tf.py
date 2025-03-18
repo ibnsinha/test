@@ -57,18 +57,13 @@ def generate_terraform(role_name):
         with open(assume_policy_file, 'w') as f:
             json.dump(assume_role_policy, f, indent=2)
 
-        # Generate `data.tf` dynamically
-        data_tf = f"""
+        assume_policy_tf = f"""
 data "aws_iam_policy_document" "instance_assume_role_policy" {{
   json = file("policies/{role_name}_assume_policy.json")
 }}
 """
     else:
-        data_tf = "## No Assume Role Policy found for this role"
-
-    with open(f"{module_dir}/data.tf", 'w') as f:
-        f.write(data_tf)
-    print(f"✅ Terraform data sources saved: {module_dir}/data.tf")
+        assume_policy_tf = "## No Assume Role Policy found for this role"
 
     # Get Managed Policies
     managed_policies = get_attached_policies(role_name)
@@ -83,6 +78,21 @@ locals {{
     with open(f"{module_dir}/locals.tf", 'w') as f:
         f.write(locals_tf)
     print(f"✅ Terraform locals saved: {module_dir}/locals.tf")
+
+    # Generate `data.tf` with Assume Role Policy and IAM Policy Data Sources
+    data_tf = assume_policy_tf  # Start with Assume Role Policy
+
+    for policy_arn in managed_policies:
+        policy_name = policy_arn.split("/")[-1]  # Extract policy name
+        data_tf += f"""
+data "aws_iam_policy" "{policy_name}" {{
+  arn = "{policy_arn}"
+}}
+"""
+
+    with open(f"{module_dir}/data.tf", 'w') as f:
+        f.write(data_tf)
+    print(f"✅ Terraform data sources saved: {module_dir}/data.tf")
 
     # Generate `main.tf`
     main_tf = f"""

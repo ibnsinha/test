@@ -36,7 +36,9 @@ def get_role_details(role_name):
 def get_attached_policies(role_name):
     """Fetch Managed Policies attached to an IAM Role"""
     try:
-        return iam_client.list_attached_role_policies(RoleName=role_name)['AttachedPolicies']
+        policies = iam_client.list_attached_role_policies(RoleName=role_name)['AttachedPolicies']
+        print(f"🔍 Managed Policies for {role_name}: {json.dumps(policies, indent=2)}")  # Debug log
+        return policies
     except Exception as e:
         print(f"[WARNING] No Managed Policies found for '{role_name}': {e}")
         return []
@@ -44,7 +46,9 @@ def get_attached_policies(role_name):
 def get_inline_policies(role_name):
     """Fetch Inline Policies attached to an IAM Role"""
     try:
-        return iam_client.list_role_policies(RoleName=role_name)['PolicyNames']
+        policies = iam_client.list_role_policies(RoleName=role_name)['PolicyNames']
+        print(f"🔍 Inline Policies for {role_name}: {json.dumps(policies, indent=2)}")  # Debug log
+        return policies
     except Exception as e:
         print(f"[WARNING] No Inline Policies found for '{role_name}': {e}")
         return []
@@ -135,6 +139,72 @@ module "iam_role" {{
     with open(root_tf_file, 'w') as f:
         f.write(iam_role_tf_code)
     print(f"✅ Terraform root configuration saved: {root_tf_file}")
+
+    # Attach Managed Policies
+    managed_policies = get_attached_policies(role_name)
+    for policy in managed_policies:
+        policy_arn = policy['PolicyArn']
+        policy_name = policy_arn.split('/')[-1]
+        policy_document = get_policy_document(policy_arn)
+
+        if policy_document:
+            policy_file = f"{policies_dir}/{role_name}_{policy_name}_managed_policy.json"
+            with open(policy_file, 'w') as f:
+                json.dump(policy_document, f, indent=2)
+
+            main_tf_code += f"""
+resource "aws_iam_role_policy_attachment" "{role_name}_{policy_name}" {{
+  role       = aws_iam_role.{role_name}.name
+  policy_arn = "{policy_arn}"
+}}
+"""
+    
+    # Attach Inline Policies
+    inline_policies = get_inline_policies(role_name)
+    for policy_name in inline_policies:
+        policy_document = get_inline_policy_document(role_name, policy_name)
+
+        if policy_document:
+            policy_file = f"{policies_dir}/{role_name}_{policy_name}_inline.json"
+            with open(policy_file, 'w') as f:
+                json.dump(policy_document, f, indent=2)
+
+            main_tf_code += f"""
+resource "aws_iam_role_policy" "{role_name}_{policy_name}" {{
+  name   = "{policy_name}"
+  role   = aws_iam_role.{role_name}.name
+  policy = file("{policy_file}")
+}}
+"""
+
+    # Attach Permissions Boundary if present
+    permissions_boundary = get_permissions_boundary(role_name)
+    if permissions_boundary:
+        main_tf_code += f'  permissions_boundary = "{permissions_boundary}"\n'
+
+    # Attach Tags if present
+    tags = get_role_tags(role_name)
+    if tags:
+        main_tf_code += "  tags = {\n"
+        for key, value in tags.items():
+            main_tf_code += f'    "{key}" = "{value}"\n'
+        main_tf_code += "  }\n"
+
+    # Attach Instance Profile if exists
+    instance_profile = get_instance_profile(role_name)
+    if instance_profile:
+        main_tf_code += f"""
+resource "aws_iam_instance_profile" "{role_name}_profile" {{
+  name = "{role_name}-profile"
+  role = aws_iam_role.{role_name}.name
+}}
+"""
+
+    # Save updated Terraform configuration in `modules/iam_role/main.tf`
+    with open(f"{module_dir}/main.tf", 'w') as f:
+        f.write(main_tf_code)
+
+    print(f"✅ Terraform configuration saved in {module_dir}/main.tf")
 
 if __name__ == "__main__":
     tfvars_path = "terraform/terraform.tfvars"

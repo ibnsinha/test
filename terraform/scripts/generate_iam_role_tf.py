@@ -25,186 +25,100 @@ def read_tfvars(file_path):
 
     return role_name
 
-def get_role_details(role_name):
-    """Fetch IAM Role details"""
+def get_assume_role_policy(role_name):
+    """Fetch Assume Role Policy from AWS IAM"""
     try:
-        return iam_client.get_role(RoleName=role_name)['Role']
+        role_details = iam_client.get_role(RoleName=role_name)
+        return role_details['Role']['AssumeRolePolicyDocument']
     except Exception as e:
-        print(f"[ERROR] IAM Role '{role_name}' not found: {e}")
-        sys.exit(1)
+        print(f"[WARNING] Could not retrieve Assume Role Policy for '{role_name}': {e}")
+        return None
 
 def get_attached_policies(role_name):
     """Fetch Managed Policies attached to an IAM Role"""
     try:
         policies = iam_client.list_attached_role_policies(RoleName=role_name)['AttachedPolicies']
-        print(f"🔍 Managed Policies for {role_name}: {json.dumps(policies, indent=2)}")  # Debug log
-        return policies
+        return [policy['PolicyArn'] for policy in policies]
     except Exception as e:
         print(f"[WARNING] No Managed Policies found for '{role_name}': {e}")
         return []
 
-def get_inline_policies(role_name):
-    """Fetch Inline Policies attached to an IAM Role"""
-    try:
-        policies = iam_client.list_role_policies(RoleName=role_name)['PolicyNames']
-        print(f"🔍 Inline Policies for {role_name}: {json.dumps(policies, indent=2)}")  # Debug log
-        return policies
-    except Exception as e:
-        print(f"[WARNING] No Inline Policies found for '{role_name}': {e}")
-        return []
-
-def get_policy_document(policy_arn):
-    """Fetch the policy document for a Managed Policy"""
-    try:
-        policy = iam_client.get_policy(PolicyArn=policy_arn)
-        version_id = policy['Policy']['DefaultVersionId']
-        policy_version = iam_client.get_policy_version(PolicyArn=policy_arn, VersionId=version_id)
-        return policy_version['PolicyVersion']['Document']
-    except Exception as e:
-        print(f"[WARNING] Could not retrieve Managed Policy '{policy_arn}': {e}")
-        return None
-
-def get_inline_policy_document(role_name, policy_name):
-    """Fetch the policy document for an Inline Policy"""
-    try:
-        return iam_client.get_role_policy(RoleName=role_name, PolicyName=policy_name)['PolicyDocument']
-    except Exception as e:
-        print(f"[WARNING] Could not retrieve Inline Policy '{policy_name}': {e}")
-        return None
-
-def get_permissions_boundary(role_name):
-    """Fetch the Permissions Boundary if it exists"""
-    try:
-        role_details = iam_client.get_role(RoleName=role_name)
-        return role_details['Role'].get('PermissionsBoundary', {}).get('PermissionsBoundaryArn')
-    except Exception as e:
-        print(f"[WARNING] No Permissions Boundary found for '{role_name}': {e}")
-        return None
-
-def get_instance_profile(role_name):
-    """Fetch Instance Profile associated with the IAM Role"""
-    try:
-        instance_profiles = iam_client.list_instance_profiles_for_role(RoleName=role_name)
-        return instance_profiles['InstanceProfiles'][0]['Arn'] if instance_profiles['InstanceProfiles'] else None
-    except Exception as e:
-        print(f"[WARNING] No Instance Profile found for '{role_name}': {e}")
-        return None
-
-def get_role_tags(role_name):
-    """Fetch IAM Role Tags"""
-    try:
-        tags_response = iam_client.list_role_tags(RoleName=role_name)
-        return {tag['Key']: tag['Value'] for tag in tags_response.get('Tags', [])}
-    except Exception as e:
-        print(f"[WARNING] No Tags found for '{role_name}': {e}")
-        return {}
-
 def generate_terraform(role_name):
-    """Generate Terraform Configuration for the IAM Role dynamically"""
-    role = get_role_details(role_name)
-
+    """Generate Terraform Configuration using locals.tf and data.tf"""
     module_dir = "terraform/modules/iam_role/"
-    root_tf_file = "terraform/iam_role.tf"
-    policies_dir = os.path.join(module_dir, "policies", role_name)
+    policies_dir = os.path.join(module_dir, "policies")
     os.makedirs(policies_dir, exist_ok=True)
 
-    # Generate Assume Role Policy
-    assume_policy = role.get('AssumeRolePolicyDocument', {})
+    # Get Assume Role Policy
+    assume_role_policy = get_assume_role_policy(role_name)
     assume_policy_file = f"{policies_dir}/{role_name}_assume_policy.json"
-    with open(assume_policy_file, 'w') as f:
-        json.dump(assume_policy, f, indent=2)
 
-    # Generate `main.tf` inside `modules/iam_role/`
-    main_tf_code = f"""
-resource "aws_iam_role" "{role_name}" {{
-  name               = "{role_name}"
-  assume_role_policy = file("policies/{role_name}_assume_policy.json")
+    if assume_role_policy:
+        with open(assume_policy_file, 'w') as f:
+            json.dump(assume_role_policy, f, indent=2)
+
+        # Generate `data.tf` dynamically
+        data_tf = f"""
+data "aws_iam_policy_document" "instance_assume_role_policy" {{
+  json = file("policies/{role_name}_assume_policy.json")
 }}
 """
+    else:
+        data_tf = "## No Assume Role Policy found for this role"
 
-    # Generate `iam_role.tf` at root to call the module
-    iam_role_tf_code = f"""
+    with open(f"{module_dir}/data.tf", 'w') as f:
+        f.write(data_tf)
+    print(f"✅ Terraform data sources saved: {module_dir}/data.tf")
+
+    # Get Managed Policies
+    managed_policies = get_attached_policies(role_name)
+
+    # Generate `locals.tf`
+    locals_tf = f"""
+locals {{
+  iam_instance_profile_name           = "{role_name}"
+  iam_instance_profile_managed_policy_arns = {json.dumps(managed_policies, indent=2)}
+}}
+"""
+    with open(f"{module_dir}/locals.tf", 'w') as f:
+        f.write(locals_tf)
+    print(f"✅ Terraform locals saved: {module_dir}/locals.tf")
+
+    # Generate `main.tf`
+    main_tf = f"""
+resource "aws_iam_instance_profile" "{role_name}" {{
+  name = "${{local.iam_instance_profile_name}}_${{formatdate("YYYY-MM-DD_hh-mm-ss", timestamp())}}"
+  role = aws_iam_role.{role_name}.name
+
+  tags = {{
+    Name = "${{local.iam_instance_profile_name}}_${{formatdate("YYYY-MM-DD_hh-mm-ss", timestamp())}}"
+  }}
+}}
+
+resource "aws_iam_role" "{role_name}" {{
+  name               = local.iam_instance_profile_name
+  assume_role_policy = data.aws_iam_policy_document.instance_assume_role_policy.json
+  managed_policy_arns = local.iam_instance_profile_managed_policy_arns
+
+  tags = {{
+    Name = "${{local.iam_instance_profile_name}}_${{formatdate("YYYY-MM-DD_hh-mm-ss", timestamp())}}"
+  }}
+}}
+"""
+    with open(f"{module_dir}/main.tf", 'w') as f:
+        f.write(main_tf)
+    print(f"✅ Terraform main configuration saved: {module_dir}/main.tf")
+
+    # Generate `iam_role.tf` to call the module
+    iam_role_tf = f"""
 module "iam_role" {{
   source    = "./modules/iam_role"
   role_name = "{role_name}"
 }}
 """
-
-    # Save `main.tf` inside module
-    with open(f"{module_dir}/main.tf", 'w') as f:
-        f.write(main_tf_code)
-    print(f"✅ Terraform module saved: {module_dir}/main.tf")
-
-    # Save `iam_role.tf` in the root directory
-    with open(root_tf_file, 'w') as f:
-        f.write(iam_role_tf_code)
-    print(f"✅ Terraform root configuration saved: {root_tf_file}")
-
-    # Attach Managed Policies
-    managed_policies = get_attached_policies(role_name)
-    for policy in managed_policies:
-        policy_arn = policy['PolicyArn']
-        policy_name = policy_arn.split('/')[-1]
-        policy_document = get_policy_document(policy_arn)
-
-        if policy_document:
-            policy_file = f"{policies_dir}/{role_name}_{policy_name}_managed_policy.json"
-            with open(policy_file, 'w') as f:
-                json.dump(policy_document, f, indent=2)
-
-            main_tf_code += f"""
-resource "aws_iam_role_policy_attachment" "{role_name}_{policy_name}" {{
-  role       = aws_iam_role.{role_name}.name
-  policy_arn = "{policy_arn}"
-}}
-"""
-    
-    # Attach Inline Policies
-    inline_policies = get_inline_policies(role_name)
-    for policy_name in inline_policies:
-        policy_document = get_inline_policy_document(role_name, policy_name)
-
-        if policy_document:
-            policy_file = f"{policies_dir}/{role_name}_{policy_name}_inline.json"
-            with open(policy_file, 'w') as f:
-                json.dump(policy_document, f, indent=2)
-
-            main_tf_code += f"""
-resource "aws_iam_role_policy" "{role_name}_{policy_name}" {{
-  name   = "{policy_name}"
-  role   = aws_iam_role.{role_name}.name
-  policy = file("{policy_file}")
-}}
-"""
-
-    # Attach Permissions Boundary if present
-    permissions_boundary = get_permissions_boundary(role_name)
-    if permissions_boundary:
-        main_tf_code += f'  permissions_boundary = "{permissions_boundary}"\n'
-
-    # Attach Tags if present
-    tags = get_role_tags(role_name)
-    if tags:
-        main_tf_code += "  tags = {\n"
-        for key, value in tags.items():
-            main_tf_code += f'    "{key}" = "{value}"\n'
-        main_tf_code += "  }\n"
-
-    # Attach Instance Profile if exists
-    instance_profile = get_instance_profile(role_name)
-    if instance_profile:
-        main_tf_code += f"""
-resource "aws_iam_instance_profile" "{role_name}_profile" {{
-  name = "{role_name}-profile"
-  role = aws_iam_role.{role_name}.name
-}}
-"""
-
-    # Save updated Terraform configuration in `modules/iam_role/main.tf`
-    with open(f"{module_dir}/main.tf", 'w') as f:
-        f.write(main_tf_code)
-
-    print(f"✅ Terraform configuration saved in {module_dir}/main.tf")
+    with open("terraform/iam_role.tf", 'w') as f:
+        f.write(iam_role_tf)
+    print(f"✅ Terraform module caller saved: terraform/iam_role.tf")
 
 if __name__ == "__main__":
     tfvars_path = "terraform/terraform.tfvars"

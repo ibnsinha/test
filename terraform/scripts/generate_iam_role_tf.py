@@ -97,21 +97,21 @@ data "aws_iam_policy" "{policy_name}" {{
     # Generate `main.tf`
     main_tf = f"""
 resource "aws_iam_instance_profile" "{role_name}" {{
-  name = "${{local.iam_instance_profile_name}}_${{formatdate("YYYY-MM-DD_hh-mm-ss", timestamp())}}"
+  name = "{role_name}"
   role = aws_iam_role.{role_name}.name
 
   tags = {{
-    Name = "${{local.iam_instance_profile_name}}_${{formatdate("YYYY-MM-DD_hh-mm-ss", timestamp())}}"
+    Name = "{role_name}"
   }}
 }}
 
 resource "aws_iam_role" "{role_name}" {{
-  name               = local.iam_instance_profile_name
+  name               = "{role_name}"
   assume_role_policy = data.aws_iam_policy_document.instance_assume_role_policy.json
   managed_policy_arns = local.iam_instance_profile_managed_policy_arns
 
   tags = {{
-    Name = "${{local.iam_instance_profile_name}}_${{formatdate("YYYY-MM-DD_hh-mm-ss", timestamp())}}"
+    Name = "{role_name}"
   }}
 }}
 """

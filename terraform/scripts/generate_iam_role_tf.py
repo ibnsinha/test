@@ -25,6 +25,14 @@ def read_tfvars(file_path):
 
     return role_name
 
+def get_role_details(role_name):
+    """Fetch IAM Role details"""
+    try:
+        return iam_client.get_role(RoleName=role_name)['Role']
+    except Exception as e:
+        print(f"[ERROR] IAM Role '{role_name}' not found: {e}")
+        sys.exit(1)
+
 def get_assume_role_policy(role_name):
     """Fetch Assume Role Policy from AWS IAM"""
     try:
@@ -42,6 +50,23 @@ def get_attached_policies(role_name):
     except Exception as e:
         print(f"[WARNING] No Managed Policies found for '{role_name}': {e}")
         return []
+
+def get_inline_policies(role_name):
+    """Fetch Inline Policies attached to an IAM Role"""
+    try:
+        policies = iam_client.list_role_policies(RoleName=role_name)['PolicyNames']
+        return policies
+    except Exception as e:
+        print(f"[WARNING] No Inline Policies found for '{role_name}': {e}")
+        return []
+
+def get_inline_policy_document(role_name, policy_name):
+    """Fetch the policy document for an Inline Policy"""
+    try:
+        return iam_client.get_role_policy(RoleName=role_name, PolicyName=policy_name)['PolicyDocument']
+    except Exception as e:
+        print(f"[WARNING] Could not retrieve Inline Policy '{policy_name}': {e}")
+        return None
 
 def generate_terraform(role_name):
     """Generate Terraform Configuration using locals.tf and data.tf"""
@@ -79,11 +104,11 @@ locals {{
         f.write(locals_tf)
     print(f"✅ Terraform locals saved: {module_dir}/locals.tf")
 
-    # Generate `data.tf` with Assume Role Policy and IAM Policy Data Sources
-    data_tf = assume_policy_tf  # Start with Assume Role Policy
+    # Generate `data.tf`
+    data_tf = assume_policy_tf  
 
     for policy_arn in managed_policies:
-        policy_name = policy_arn.split("/")[-1]  # Extract policy name
+        policy_name = policy_arn.split("/")[-1]  
         data_tf += f"""
 data "aws_iam_policy" "{policy_name}" {{
   arn = "{policy_arn}"
@@ -96,15 +121,6 @@ data "aws_iam_policy" "{policy_name}" {{
 
     # Generate `main.tf`
     main_tf = f"""
-resource "aws_iam_instance_profile" "{role_name}" {{
-  name = "{role_name}"
-  role = aws_iam_role.{role_name}.name
-
-  tags = {{
-    Name = "{role_name}"
-  }}
-}}
-
 resource "aws_iam_role" "{role_name}" {{
   name               = "{role_name}"
   assume_role_policy = data.aws_iam_policy_document.instance_assume_role_policy.json

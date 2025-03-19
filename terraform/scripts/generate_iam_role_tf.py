@@ -25,14 +25,6 @@ def read_tfvars(file_path):
 
     return role_name
 
-def get_role_details(role_name):
-    """Fetch IAM Role details"""
-    try:
-        return iam_client.get_role(RoleName=role_name)['Role']
-    except Exception as e:
-        print(f"[ERROR] IAM Role '{role_name}' not found: {e}")
-        sys.exit(1)
-
 def get_assume_role_policy(role_name):
     """Fetch Assume Role Policy from AWS IAM"""
     try:
@@ -126,13 +118,19 @@ data "aws_iam_policy_document" "instance_assume_role_policy" {{
 locals {{
   iam_role_name               = "{role_name}"
   iam_managed_policy_arns     = {json.dumps(managed_policies, indent=2)}
-}}
 """
 
     # Get Permissions Boundary and Add It If It Exists
     permissions_boundary_arn = get_permissions_boundary(role_name)
     if permissions_boundary_arn:
         locals_tf += f'  iam_permissions_boundary = "{permissions_boundary_arn}"\n'
+
+    # Get Instance Profile and Add It If It Exists
+    instance_profile_name = get_instance_profile(role_name)
+    if instance_profile_name:
+        locals_tf += f'  iam_instance_profile_name = "{instance_profile_name}"\n'
+
+    locals_tf += "}\n"
 
     with open(f"{module_dir}/locals.tf", 'w') as f:
         f.write(locals_tf)
@@ -165,12 +163,11 @@ resource "aws_iam_role" "{role_name}" {{
 
     main_tf += "  tags = {\n    Name = local.iam_role_name\n  }\n}"
 
-    # Get Instance Profile and Add It Only If It Exists
-    instance_profile_name = get_instance_profile(role_name)
+    # **Only create instance profile if it exists**
     if instance_profile_name:
         main_tf += f"""
 resource "aws_iam_instance_profile" "{role_name}" {{
-  name = "{instance_profile_name}"
+  name = local.iam_instance_profile_name
   role = aws_iam_role.{role_name}.name
 }}
 """

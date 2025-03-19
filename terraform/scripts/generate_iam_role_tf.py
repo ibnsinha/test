@@ -88,15 +88,23 @@ def get_instance_profile(role_name):
         print(f"[WARNING] No Instance Profile found for '{role_name}': {e}")
         return None
 
+def get_role_tags(role_name):
+    """Fetch IAM Role Tags"""
+    try:
+        tags_response = iam_client.list_role_tags(RoleName=role_name)
+        return {tag['Key']: tag['Value'] for tag in tags_response.get('Tags', [])}
+    except Exception as e:
+        print(f"[WARNING] No Tags found for '{role_name}': {e}")
+        return {}
+
 def generate_terraform(role_name):
     """Generate Terraform Configuration using locals.tf and data.tf"""
     module_dir = "terraform/modules/iam_role/"
-    policies_dir = os.path.join(module_dir, "policies")
-    os.makedirs(policies_dir, exist_ok=True)
+    os.makedirs(module_dir, exist_ok=True)
 
     # Get Assume Role Policy
     assume_role_policy = get_assume_role_policy(role_name)
-    assume_policy_file = f"{policies_dir}/{role_name}_assume_policy.json"
+    assume_policy_file = f"{module_dir}/policies/{role_name}_assume_policy.json"
 
     if assume_role_policy:
         with open(assume_policy_file, 'w') as f:
@@ -116,15 +124,21 @@ data "aws_iam_policy_document" "instance_assume_role_policy" {{
     # Generate `locals.tf`
     locals_tf = f"""
 locals {{
-  iam_instance_profile_name           = "{role_name}"
-  iam_instance_profile_managed_policy_arns = {json.dumps(managed_policies, indent=2)}
+  iam_role_name               = "{role_name}"
+  iam_managed_policy_arns     = {json.dumps(managed_policies, indent=2)}
 }}
 """
+
+    # Get Permissions Boundary and Add It If It Exists
+    permissions_boundary_arn = get_permissions_boundary(role_name)
+    if permissions_boundary_arn:
+        locals_tf += f'  iam_permissions_boundary = "{permissions_boundary_arn}"\n'
+
     with open(f"{module_dir}/locals.tf", 'w') as f:
         f.write(locals_tf)
 
     # Generate `data.tf`
-    data_tf = assume_policy_tf  
+    data_tf = assume_policy_tf
 
     for policy_arn in managed_policies:
         policy_name = policy_arn.split("/")[-1]  
@@ -140,19 +154,18 @@ data "aws_iam_policy" "{policy_name}" {{
     # Generate `main.tf`
     main_tf = f"""
 resource "aws_iam_role" "{role_name}" {{
-  name               = "{role_name}"
+  name               = local.iam_role_name
   assume_role_policy = data.aws_iam_policy_document.instance_assume_role_policy.json
-  managed_policy_arns = local.iam_instance_profile_managed_policy_arns
+  managed_policy_arns = local.iam_managed_policy_arns
 """
 
-    # Get Permissions Boundary and Add It If It Exists
-    permissions_boundary_arn = get_permissions_boundary(role_name)
+    # Attach Permissions Boundary if present
     if permissions_boundary_arn:
         main_tf += f'  permissions_boundary = "{permissions_boundary_arn}"\n'
 
-    main_tf += "  tags = {\n    Name = \"{role_name}\"\n  }\n}\n"
+    main_tf += "  tags = {\n    Name = local.iam_role_name\n  }\n}"
 
-    # Get Instance Profile and Add It If It Exists
+    # Get Instance Profile and Add It Only If It Exists
     instance_profile_name = get_instance_profile(role_name)
     if instance_profile_name:
         main_tf += f"""

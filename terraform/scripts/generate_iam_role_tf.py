@@ -68,6 +68,26 @@ def get_inline_policy_document(role_name, policy_name):
         print(f"[WARNING] Could not retrieve Inline Policy '{policy_name}': {e}")
         return None
 
+def get_permissions_boundary(role_name):
+    """Fetch the Permissions Boundary ARN if set"""
+    try:
+        role_details = iam_client.get_role(RoleName=role_name)
+        return role_details['Role'].get('PermissionsBoundary', {}).get('PermissionsBoundaryArn')
+    except Exception as e:
+        print(f"[WARNING] No Permissions Boundary found for '{role_name}': {e}")
+        return None
+
+def get_instance_profile(role_name):
+    """Fetch Instance Profile associated with the IAM Role"""
+    try:
+        instance_profiles = iam_client.list_instance_profiles_for_role(RoleName=role_name)
+        if instance_profiles['InstanceProfiles']:
+            return instance_profiles['InstanceProfiles'][0]['InstanceProfileName']
+        return None
+    except Exception as e:
+        print(f"[WARNING] No Instance Profile found for '{role_name}': {e}")
+        return None
+
 def generate_terraform(role_name):
     """Generate Terraform Configuration using locals.tf and data.tf"""
     module_dir = "terraform/modules/iam_role/"
@@ -102,7 +122,6 @@ locals {{
 """
     with open(f"{module_dir}/locals.tf", 'w') as f:
         f.write(locals_tf)
-    print(f"✅ Terraform locals saved: {module_dir}/locals.tf")
 
     # Generate `data.tf`
     data_tf = assume_policy_tf  
@@ -117,7 +136,6 @@ data "aws_iam_policy" "{policy_name}" {{
 
     with open(f"{module_dir}/data.tf", 'w') as f:
         f.write(data_tf)
-    print(f"✅ Terraform data sources saved: {module_dir}/data.tf")
 
     # Generate `main.tf`
     main_tf = f"""
@@ -125,15 +143,27 @@ resource "aws_iam_role" "{role_name}" {{
   name               = "{role_name}"
   assume_role_policy = data.aws_iam_policy_document.instance_assume_role_policy.json
   managed_policy_arns = local.iam_instance_profile_managed_policy_arns
+"""
 
-  tags = {{
-    Name = "{role_name}"
-  }}
+    # Get Permissions Boundary and Add It If It Exists
+    permissions_boundary_arn = get_permissions_boundary(role_name)
+    if permissions_boundary_arn:
+        main_tf += f'  permissions_boundary = "{permissions_boundary_arn}"\n'
+
+    main_tf += "  tags = {\n    Name = \"{role_name}\"\n  }\n}\n"
+
+    # Get Instance Profile and Add It If It Exists
+    instance_profile_name = get_instance_profile(role_name)
+    if instance_profile_name:
+        main_tf += f"""
+resource "aws_iam_instance_profile" "{role_name}" {{
+  name = "{instance_profile_name}"
+  role = aws_iam_role.{role_name}.name
 }}
 """
+
     with open(f"{module_dir}/main.tf", 'w') as f:
         f.write(main_tf)
-    print(f"✅ Terraform main configuration saved: {module_dir}/main.tf")
 
     # Generate `iam_role.tf` to call the module
     iam_role_tf = f"""
@@ -144,11 +174,9 @@ module "iam_role" {{
 """
     with open("terraform/iam_role.tf", 'w') as f:
         f.write(iam_role_tf)
-    print(f"✅ Terraform module caller saved: terraform/iam_role.tf")
 
 if __name__ == "__main__":
     tfvars_path = "terraform/terraform.tfvars"
     role_name = read_tfvars(tfvars_path)
-    print(f"✅ Using IAM Role: {role_name}")
     generate_terraform(role_name)
 

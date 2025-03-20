@@ -1,0 +1,10 @@
+before_script:
+  - echo "🔑 Assuming AWS IAM role..."
+  - python3 scripts/assume_role.py || { echo "❌ Failed to assume role"; exit 1; }
+  - echo "✅ Role assumed successfully, loading credentials..."
+  - export $(grep -v '^#' /tmp/aws_credentials | xargs)
+  - aws sts get-caller-identity  # Confirm authentication (ID will be masked)
+  - echo "🚀 Running Python script to generate Terraform configuration..."
+  - python3 scripts/generate_iam_role_tf.py || { echo "❌ Failed to generate Terraform configuration"; exit 1; }
+  - rm -f /tmp/aws_credentials  # 🛑 Remove credentials after use
+

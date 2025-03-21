@@ -182,3 +182,35 @@ or
 
 export INSTANCE_PROFILE_NAME=$(sed -n 's/resource "aws_iam_instance_profile" "\(.*\)"/\1/p' modules/iam_role/main.tf || echo "")
 
+
+
+
+Instance profile tags
+
+import boto3
+
+# Initialize boto3 client for IAM
+iam_client = boto3.client('iam')
+
+def get_instance_profile_tags(instance_profile_name):
+    """
+    Retrieve and print tags associated with the specified IAM instance profile.
+    
+    :param instance_profile_name: The name of the IAM instance profile
+    """
+    try:
+        response = iam_client.list_instance_profile_tags(InstanceProfileName=instance_profile_name)
+        tags = response.get('Tags', [])
+        if not tags:
+            print(f"No tags found for instance profile '{instance_profile_name}'.")
+        else:
+            print(f"Tags for instance profile '{instance_profile_name}':")
+            for tag in tags:
+                print(f"Key: {tag['Key']}, Value: {tag['Value']}")
+    except iam_client.exceptions.NoSuchEntityException:
+        print(f"The instance profile '{instance_profile_name}' does not exist.")
+
+if __name__ == "__main__":
+    # Replace 'YourInstanceProfileName' with the IAM instance profile name you want to query.
+    get_instance_profile_tags("YourInstanceProfileName")
+

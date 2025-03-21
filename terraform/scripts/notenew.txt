@@ -136,3 +136,33 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+
+
+
+========
+
+import_iam_role:
+  stage: import
+  script:
+    - terraform init -input=false
+    - export ROLE_NAME=$(grep '^role_name' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+    - if [ -z "$ROLE_NAME" ]; then echo "❌ ERROR: ROLE_NAME is empty! Check terraform.tfvars"; exit 1; fi
+    - echo "✅ ROLE_NAME extracted: ${ROLE_NAME}"
+
+    # 🔹 Run Python Script to Check IAM Role and Update terraform.tfvars
+    - python3 scripts/generate_iam_role_tf.py
+
+    # 🔹 Read `ROLE_EXISTS` from terraform.tfvars
+    - export ROLE_EXISTS=$(grep '^ROLE_EXISTS' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+    - echo "✅ ROLE_EXISTS value: ${ROLE_EXISTS}"
+
+    # 🔹 Use ROLE_EXISTS in GitLab Pipeline
+    - if [[ "$ROLE_EXISTS" == "NOT_FOUND" ]]; then
+        echo "⚠️ IAM Role $ROLE_NAME does not exist. Skipping import.";
+      else
+        echo "✅ IAM Role $ROLE_NAME exists. Importing...";
+        terraform import module.iam_role.aws_iam_role.iam_role ${ROLE_NAME};
+      fi
+  when: manual  # Prevent automatic execution
+

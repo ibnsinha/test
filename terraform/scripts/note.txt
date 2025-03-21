@@ -399,3 +399,24 @@ import_iam_role:
       fi
   when: manual  # Prevent automatic execution
 
+
+================================
+def main():
+    tfvars_path = "terraform/terraform.tfvars"
+    role_name = read_tfvars(tfvars_path)
+
+    # 🔹 Check if IAM Role exists and write status to `role_status.env`
+    role_status = check_iam_role_exists(role_name)
+    with open("role_status.env", "w") as f:
+        f.write(f"ROLE_EXISTS={role_status}\n")
+
+    print(f"✅ IAM Role Status: {role_status}")
+
+    # 🔹 Generate Terraform only if IAM Role exists
+    if role_status == "FOUND":
+        generate_terraform(role_name)
+    else:
+        print(f" IAM Role '{role_name}' does not exist. Skipping Terraform file generation.")
+
+if __name__ == "__main__":
+    main()

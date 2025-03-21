@@ -101,3 +101,45 @@ import_iam_resources:
       fi
   when: manual  # Run manually to prevent accidental execution
 
+
+
+
+
+Already imported resources:
+
+import_iam_resources:
+  stage: import
+  script:
+    - terraform init -input=false
+    - export ROLE_NAME=$(grep '^role_name' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+    - if [ -z "$ROLE_NAME" ]; then echo "❌ ERROR: ROLE_NAME is empty! Check terraform.tfvars"; exit 1; fi
+    - echo "✅ ROLE_NAME extracted: ${ROLE_NAME}"
+    
+    # 🔹 Check if IAM Role is already imported
+    - terraform state list | grep "module.iam_role.aws_iam_role.iam_role" && echo "✅ IAM Role already imported. Skipping..." || terraform import module.iam_role.aws_iam_role.iam_role ${ROLE_NAME}
+
+    # 🔹 Extract & Import Instance Profile (If Exists and Not Already Imported)
+    - export INSTANCE_PROFILE_NAME=$(grep -oP 'resource "aws_iam_instance_profile" "\K[^"]+' modules/iam_role/main.tf || echo "")
+    - if [[ -n "$INSTANCE_PROFILE_NAME" ]]; then
+        terraform state list | grep "module.iam_role.aws_iam_instance_profile.$INSTANCE_PROFILE_NAME" && echo "✅ Instance Profile already imported. Skipping..." ||
+        terraform import module.iam_role.aws_iam_instance_profile.$INSTANCE_PROFILE_NAME $INSTANCE_PROFILE_NAME;
+      else
+        echo "⚠️ No instance profile found in main.tf. Skipping import.";
+      fi
+
+    # 🔹 Extract & Import Managed Policies (If Not Already Imported)
+    - export MANAGED_POLICY_ARNS=$(grep -oP 'arn:aws:iam::\d+:policy/\K[^"]+' modules/iam_role/main.tf || echo "")
+    - for POLICY in $MANAGED_POLICY_ARNS; do
+        terraform state list | grep "module.iam_role.aws_iam_role_policy_attachment.$POLICY" && echo "✅ Managed Policy $POLICY already imported. Skipping..." ||
+        terraform import module.iam_role.aws_iam_role_policy_attachment.$POLICY arn:aws:iam::$ACCOUNT_ID:policy/$POLICY;
+      done
+
+    # 🔹 Extract & Import Inline Policies (If Not Already Imported)
+    - export INLINE_POLICIES=$(grep -oP 'resource "aws_iam_role_policy" "\K[^"]+' modules/iam_role/main.tf || echo "")
+    - for POLICY in $INLINE_POLICIES; do
+        terraform state list | grep "module.iam_role.aws_iam_role_policy.$POLICY" && echo "✅ Inline Policy $POLICY already imported. Skipping..." ||
+        terraform import module.iam_role.aws_iam_role_policy.$POLICY $ROLE_NAME/$POLICY;
+      done
+
+  when: manual  # Run manually to prevent accidental execution
+

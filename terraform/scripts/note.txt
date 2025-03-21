@@ -214,3 +214,125 @@ if __name__ == "__main__":
     # Replace 'YourInstanceProfileName' with the IAM instance profile name you want to query.
     get_instance_profile_tags("YourInstanceProfileName")
 
+
+
+
+Instance profile tag
+
+
+import boto3
+import json
+import os
+import sys
+
+# Initialize boto3 IAM client
+iam_client = boto3.client('iam')
+
+def read_tfvars(file_path):
+    """Read terraform.tfvars and extract role_name. Exit if not found."""
+    if not os.path.exists(file_path):
+        print(f"[ERROR] Required file '{file_path}' not found. Please create it with role_name.")
+        sys.exit(1)
+
+    role_name = None
+    with open(file_path, "r") as f:
+        for line in f:
+            if line.startswith("role_name"):
+                role_name = line.split("=")[1].strip().replace('"', '')
+                break
+
+    if not role_name:
+        print(f"[ERROR] 'role_name' is missing in {file_path}. It is a mandatory field.")
+        sys.exit(1)
+
+    return role_name
+
+def get_instance_profile(role_name):
+    """Fetch Instance Profile associated with the IAM Role"""
+    try:
+        instance_profiles = iam_client.list_instance_profiles_for_role(RoleName=role_name)
+        if instance_profiles['InstanceProfiles']:
+            return instance_profiles['InstanceProfiles'][0]['InstanceProfileName']
+        return None
+    except Exception as e:
+        print(f"[WARNING] No Instance Profile found for '{role_name}': {e}")
+        return None
+
+def get_instance_profile_tags(instance_profile_name):
+    """Fetch Tags for the Instance Profile"""
+    try:
+        response = iam_client.list_instance_profile_tags(InstanceProfileName=instance_profile_name)
+        return {tag['Key']: tag['Value'] for tag in response.get('Tags', [])}
+    except Exception as e:
+        print(f"[WARNING] No Tags found for Instance Profile '{instance_profile_name}': {e}")
+        return {}
+
+def generate_terraform(role_name):
+    """Generate Terraform Configuration including tags"""
+    module_dir = "terraform/modules/iam_role/"
+    os.makedirs(module_dir, exist_ok=True)
+
+    # Get Instance Profile
+    instance_profile_name = get_instance_profile(role_name)
+
+    # Generate `locals.tf`
+    locals_tf = f"""
+locals {{
+  iam_role_name               = "{role_name}"
+"""
+
+    # If Instance Profile exists, use the exact name
+    if instance_profile_name:
+        locals_tf += f'  iam_instance_profile_name = "{instance_profile_name}"\n'
+
+    locals_tf += "}\n"
+
+    with open(f"{module_dir}/locals.tf", 'w') as f:
+        f.write(locals_tf)
+
+    # Generate `main.tf` inside `modules/iam_role/`
+    main_tf = f"""
+resource "aws_iam_role" "{role_name}" {{
+  name               = local.iam_role_name
+  assume_role_policy = data.aws_iam_policy_document.instance_assume_role_policy.json
+}}
+
+"""
+
+    # **Only create instance profile if it exists**
+    if instance_profile_name:
+        instance_profile_tags = get_instance_profile_tags(instance_profile_name)
+
+        main_tf += f"""
+resource "aws_iam_instance_profile" "{instance_profile_name}" {{
+  name = local.iam_instance_profile_name
+  role = aws_iam_role.{role_name}.name
+"""
+
+        # If tags exist, include them in `main.tf`
+        if instance_profile_tags:
+            main_tf += "  tags = {\n"
+            for key, value in instance_profile_tags.items():
+                main_tf += f'    "{key}" = "{value}"\n'
+            main_tf += "  }\n"
+
+        main_tf += "}\n"
+
+    with open(f"{module_dir}/main.tf", 'w') as f:
+        f.write(main_tf)
+
+    # Generate `iam_role.tf` to call the module
+    iam_role_tf = f"""
+module "iam_role" {{
+  source    = "./modules/iam_role"
+  role_name = "{role_name}"
+}}
+"""
+    with open("terraform/iam_role.tf", 'w') as f:
+        f.write(iam_role_tf)
+
+if __name__ == "__main__":
+    tfvars_path = "terraform/terraform.tfvars"
+    role_name = read_tfvars(tfvars_path)
+    generate_terraform(role_name)
+

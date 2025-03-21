@@ -1,0 +1,138 @@
+import boto3
+import os
+
+# Initialize boto3 IAM client
+iam_client = boto3.client('iam')
+
+def read_tfvars(file_path):
+    """Read terraform.tfvars and extract role_name. Exit if not found."""
+    if not os.path.exists(file_path):
+        print(f"[ERROR] Required file '{file_path}' not found. Please create it with role_name.")
+        exit(1)
+
+    role_name = None
+    with open(file_path, "r") as f:
+        for line in f:
+            if line.startswith("role_name"):
+                role_name = line.split("=")[1].strip().replace('"', '')
+                break
+
+    if not role_name:
+        print(f"[ERROR] 'role_name' is missing in {file_path}. It is a mandatory field.")
+        exit(1)
+
+    return role_name
+
+def check_iam_role_exists(role_name):
+    """Check if IAM Role exists in AWS"""
+    try:
+        iam_client.get_role(RoleName=role_name)
+        return "FOUND"
+    except iam_client.exceptions.NoSuchEntityException:
+        return "NOT_FOUND"
+    except Exception as e:
+        print(f"[ERROR] Unexpected error checking IAM Role: {e}")
+        return "ERROR"
+
+def update_tfvars(file_path, role_status):
+    """Append ROLE_EXISTS status to terraform.tfvars"""
+    # Remove existing ROLE_EXISTS if present
+    lines = []
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+    
+    with open(file_path, "w") as f:
+        for line in lines:
+            if not line.startswith("ROLE_EXISTS"):
+                f.write(line)  # Keep existing lines except previous ROLE_EXISTS
+        f.write(f'ROLE_EXISTS = "{role_status}"\n')  # Append new ROLE_EXISTS value
+
+def main():
+    tfvars_path = "terraform/terraform.tfvars"
+    role_name = read_tfvars(tfvars_path)
+
+    # 🔹 Check if IAM Role exists
+    role_status = check_iam_role_exists(role_name)
+
+    # 🔹 Write `ROLE_EXISTS` to `terraform.tfvars`
+    update_tfvars(tfvars_path, role_status)
+
+    print(f"✅ IAM Role Status: {role_status} (Updated in terraform.tfvars)")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+import boto3
+import os
+
+# Initialize boto3 IAM client
+iam_client = boto3.client('iam')
+
+def read_tfvars(file_path):
+    """Read terraform.tfvars and extract role_name. Exit if not found."""
+    if not os.path.exists(file_path):
+        print(f"[ERROR] Required file '{file_path}' not found. Please create it with role_name.")
+        exit(1)
+
+    role_name = None
+    with open(file_path, "r") as f:
+        for line in f:
+            if line.startswith("role_name"):
+                role_name = line.split("=")[1].strip().replace('"', '')
+                break
+
+    if not role_name:
+        print(f"[ERROR] 'role_name' is missing in {file_path}. It is a mandatory field.")
+        exit(1)
+
+    return role_name
+
+def check_iam_role_exists(role_name):
+    """Check if IAM Role exists in AWS"""
+    try:
+        iam_client.get_role(RoleName=role_name)
+        return "FOUND"
+    except iam_client.exceptions.NoSuchEntityException:
+        return "NOT_FOUND"
+    except Exception as e:
+        print(f"[ERROR] Unexpected error checking IAM Role: {e}")
+        return "ERROR"
+
+def update_tfvars(file_path, role_status):
+    """Append ROLE_EXISTS status to terraform.tfvars"""
+    # Remove existing ROLE_EXISTS if present
+    lines = []
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+    
+    with open(file_path, "w") as f:
+        for line in lines:
+            if not line.startswith("ROLE_EXISTS"):
+                f.write(line)  # Keep existing lines except previous ROLE_EXISTS
+        f.write(f'ROLE_EXISTS = "{role_status}"\n')  # Append new ROLE_EXISTS value
+
+def main():
+    tfvars_path = "terraform/terraform.tfvars"
+    role_name = read_tfvars(tfvars_path)
+
+    # 🔹 Check if IAM Role exists
+    role_status = check_iam_role_exists(role_name)
+
+    # 🔹 Write `ROLE_EXISTS` to `terraform.tfvars`
+    update_tfvars(tfvars_path, role_status)
+
+    print(f"✅ IAM Role Status: {role_status} (Updated in terraform.tfvars)")
+
+if __name__ == "__main__":
+    main()
+

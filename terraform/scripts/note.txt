@@ -8,3 +8,45 @@ before_script:
   - python3 scripts/generate_iam_role_tf.py || { echo "❌ Failed to generate Terraform configuration"; exit 1; }
   - rm -f /tmp/aws_credentials  # 🛑 Remove credentials after use
 
+
+
+import_instance_profile:
+  stage: import
+  script:
+    - export INSTANCE_PROFILE_NAME=$(grep -oP 'resource "aws_iam_instance_profile" "\K[^"]+' modules/iam_role/main.tf || echo "")
+    - if [[ -n "$INSTANCE_PROFILE_NAME" ]]; then
+        echo "✅ Instance Profile found in main.tf: $INSTANCE_PROFILE_NAME";
+        terraform import module.iam_role.aws_iam_instance_profile.$INSTANCE_PROFILE_NAME $INSTANCE_PROFILE_NAME;
+      else
+        echo "⚠️ No instance profile found in main.tf. Skipping import.";
+      fi
+  when: manual  # Prevent automatic execution
+
+
+
+
+
+import_iam_resources:
+  stage: import
+  script:
+    - terraform init -input=false
+    - export ROLE_NAME=$(grep '^role_name' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+    - if [ -z "$ROLE_NAME" ]; then echo "❌ ERROR: ROLE_NAME is empty! Check terraform.tfvars"; exit 1; fi
+    - echo "✅ ROLE_NAME extracted: ${ROLE_NAME}"
+    
+    # 🔹 Import IAM Role
+    - echo "🔄 Importing IAM Role: ${ROLE_NAME}..."
+    - terraform import module.iam_role.aws_iam_role.iam_role ${ROLE_NAME}
+
+    # 🔹 Extract Instance Profile Name from main.tf
+    - export INSTANCE_PROFILE_NAME=$(grep -oP 'resource "aws_iam_instance_profile" "\K[^"]+' modules/iam_role/main.tf || echo "")
+
+    # 🔹 Import Instance Profile If Found
+    - if [[ -n "$INSTANCE_PROFILE_NAME" ]]; then
+        echo "✅ Instance Profile found in main.tf: $INSTANCE_PROFILE_NAME";
+        terraform import module.iam_role.aws_iam_instance_profile.$INSTANCE_PROFILE_NAME $INSTANCE_PROFILE_NAME;
+      else
+        echo "⚠️ No instance profile found in main.tf. Skipping import.";
+      fi
+  when: manual  # Run manually to prevent accidental execution
+

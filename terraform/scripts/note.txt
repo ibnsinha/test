@@ -175,3 +175,10 @@ import_iam_resources:
       fi
   when: manual  # Prevent automatic execution
 
+
+
+
+or
+
+export INSTANCE_PROFILE_NAME=$(sed -n 's/resource "aws_iam_instance_profile" "\(.*\)"/\1/p' modules/iam_role/main.tf || echo "")
+

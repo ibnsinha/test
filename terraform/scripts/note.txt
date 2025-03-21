@@ -50,3 +50,54 @@ import_iam_resources:
       fi
   when: manual  # Run manually to prevent accidental execution
 
+
+
+
+
+For any main.tf resources:
+
+
+import_iam_resources:
+  stage: import
+  script:
+    - terraform init -input=false
+    - export ROLE_NAME=$(grep '^role_name' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+    - if [ -z "$ROLE_NAME" ]; then echo "❌ ERROR: ROLE_NAME is empty! Check terraform.tfvars"; exit 1; fi
+    - echo "✅ ROLE_NAME extracted: ${ROLE_NAME}"
+    
+    # 🔹 Import IAM Role
+    - echo "🔄 Importing IAM Role: ${ROLE_NAME}..."
+    - terraform import module.iam_role.aws_iam_role.iam_role ${ROLE_NAME}
+
+    # 🔹 Extract Instance Profile Name from main.tf and Import If Found
+    - export INSTANCE_PROFILE_NAME=$(grep -oP 'resource "aws_iam_instance_profile" "\K[^"]+' modules/iam_role/main.tf || echo "")
+    - if [[ -n "$INSTANCE_PROFILE_NAME" ]]; then
+        echo "✅ Instance Profile found in main.tf: $INSTANCE_PROFILE_NAME";
+        terraform import module.iam_role.aws_iam_instance_profile.$INSTANCE_PROFILE_NAME $INSTANCE_PROFILE_NAME;
+      else
+        echo "⚠️ No instance profile found in main.tf. Skipping import.";
+      fi
+
+    # 🔹 Extract & Import Managed Policies
+    - export MANAGED_POLICY_ARNS=$(grep -oP 'arn:aws:iam::\d+:policy/\K[^"]+' modules/iam_role/main.tf || echo "")
+    - for POLICY in $MANAGED_POLICY_ARNS; do
+        echo "✅ Importing Managed Policy Attachment: $POLICY";
+        terraform import module.iam_role.aws_iam_role_policy_attachment.$POLICY arn:aws:iam::$ACCOUNT_ID:policy/$POLICY;
+      done
+
+    # 🔹 Extract & Import Inline Policies
+    - export INLINE_POLICIES=$(grep -oP 'resource "aws_iam_role_policy" "\K[^"]+' modules/iam_role/main.tf || echo "")
+    - for POLICY in $INLINE_POLICIES; do
+        echo "✅ Importing Inline Policy: $POLICY";
+        terraform import module.iam_role.aws_iam_role_policy.$POLICY $ROLE_NAME/$POLICY;
+      done
+
+    # 🔹 Validate Permissions Boundary (No Separate Import Required)
+    - export PERMISSIONS_BOUNDARY=$(grep -oP 'permissions_boundary = "\K[^"]+' modules/iam_role/main.tf || echo "")
+    - if [[ -n "$PERMISSIONS_BOUNDARY" ]]; then
+        echo "✅ Permissions Boundary is set: $PERMISSIONS_BOUNDARY";
+      else
+        echo "⚠️ No Permissions Boundary found.";
+      fi
+  when: manual  # Run manually to prevent accidental execution
+

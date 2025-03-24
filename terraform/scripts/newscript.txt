@@ -106,3 +106,55 @@ git push origin main || echo "Skipping push (no changes or permissions issue)"
 
 echo "🎉 Pipeline setup complete!"
 
+
+
+===========================
+
+
+stages:
+  - validate
+  - setup
+  - import
+  - apply
+  - destroy
+
+validate:
+  stage: validate
+  script:
+    # Check if artifact from previous run exists
+    - if [ -f terraform/terraform.tfvars ]; then
+        echo "🔍 Checking IMPORT_COMPLETED in terraform.tfvars...";
+        IMPORT_COMPLETED=$(grep '^IMPORT_COMPLETED' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "');
+        if [ "$IMPORT_COMPLETED" == "true" ]; then
+          echo "✅ Import already completed. Skipping clone...";
+          exit 0;
+        fi;
+      fi
+    - echo "🚀 Import not completed. Proceeding with cloning ProjectA..."
+  artifacts:
+    name: "terraform-files-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - terraform/terraform.tfvars
+    expire_in: 30 days
+    when: always
+
+setup_pipeline:
+  stage: setup
+  dependencies:
+    - validate  # Ensure we check artifacts before cloning
+  script:
+    - git clone https://gitlab.com/group/projectA.git
+    - mv projectA/modules/iam_role modules/iam_role
+    - chmod +x projectA/scripts/setup_pipeline.sh
+    - ./projectA/scripts/setup_pipeline.sh
+    - rm -rf projectA  # Cleanup after execution
+  artifacts:
+    name: "terraform-files-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - modules/
+      - terraform/terraform.tfvars
+      - iam_role.tf
+      - "*.tf"
+    expire_in: 30 days
+    when: always
+

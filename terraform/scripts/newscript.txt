@@ -1,0 +1,108 @@
+#!/bin/bash
+set -e  # Exit if any command fails
+
+# Load Terraform variables if the file exists
+TFVARS_FILE="terraform/terraform.tfvars"
+if [ -f "$TFVARS_FILE" ]; then
+    IMPORT_COMPLETED=$(grep '^IMPORT_COMPLETED' "$TFVARS_FILE" | cut -d'=' -f2 | tr -d ' "')
+else
+    IMPORT_COMPLETED="false"
+fi
+
+# 🔹 Skip setup if import already completed
+if [[ "$IMPORT_COMPLETED" == "true" ]]; then
+    echo "✅ Import already completed. Skipping clone & setup."
+    exit 0
+fi
+
+echo "🚀 Setting up GitLab pipeline..."
+
+# 🔹 Clone ProjectA only if not already cloned
+if [ ! -d "projectA" ]; then
+    echo "📥 Cloning ProjectA..."
+    git clone https://gitlab.com/group/projectA.git
+    mv projectA/modules/iam_role modules/iam_role
+    rm -rf projectA
+fi
+
+# 🔹 Run Python script to generate Terraform files
+echo "🐍 Running Python script to generate Terraform files..."
+python3 scripts/generate_iam_role_tf.py
+
+# 🔹 Read ROLE_NAME from terraform.tfvars
+ROLE_NAME=$(grep '^role_name' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+
+# 🔹 Read ROLE_EXISTS status
+ROLE_EXISTS=$(grep '^ROLE_EXISTS' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')
+
+# 🔹 Commit generated Terraform files to ProjectB
+echo "💾 Committing Terraform files to ProjectB..."
+git config --global user.email "gitlab-ci@example.com"
+git config --global user.name "GitLab CI"
+git remote set-url origin https://gitlab.com/group/projectB.git
+git add modules/iam_role/*.tf terraform/terraform.tfvars || true
+git commit -m "Updating Terraform files with latest IAM role state" || echo "No changes to commit"
+git push origin main || echo "Skipping push (no changes or permissions issue)"
+
+# 🔹 If IAM Role exists, import it
+if [[ "$ROLE_EXISTS" == "FOUND" ]]; then
+    echo "✅ Importing IAM Role ${ROLE_NAME}..."
+    terraform import module.iam_role.aws_iam_role.${ROLE_NAME} ${ROLE_NAME}
+else
+    echo "⚠️ IAM Role $ROLE_NAME does not exist. Skipping import."
+fi
+
+echo "🎉 Pipeline setup complete!"
+
+
+
+
+
+
+
+
+
+
+
+
+
+===================
+
+
+#!/bin/bash
+set -e  # Exit on error
+
+TFVARS_FILE="terraform/terraform.tfvars"
+
+# 🔹 Check if import is already completed
+if [ -f "$TFVARS_FILE" ]; then
+    IMPORT_COMPLETED=$(grep '^IMPORT_COMPLETED' "$TFVARS_FILE" | cut -d'=' -f2 | tr -d ' "')
+else
+    IMPORT_COMPLETED="false"
+fi
+
+if [[ "$IMPORT_COMPLETED" == "true" ]]; then
+    echo "✅ Import already completed. Skipping Terraform file regeneration."
+    exit 0
+fi
+
+echo "🚀 Setting up GitLab pipeline..."
+
+# 🔹 Run Python script to generate Terraform files
+echo "🐍 Running Python script to generate Terraform files..."
+python3 projectA/scripts/generate_iam_role_tf.py
+
+# 🔹 Mark import as completed
+echo 'IMPORT_COMPLETED = "true"' >> "$TFVARS_FILE"
+
+# 🔹 Commit changes to ProjectB
+echo "💾 Committing Terraform files to ProjectB..."
+git config --global user.email "gitlab-ci@example.com"
+git config --global user.name "GitLab CI"
+git remote set-url origin https://gitlab.com/group/projectB.git
+git add modules/iam_role/*.tf terraform/terraform.tfvars || true
+git commit -m "Updating Terraform files with latest IAM role state" || echo "No changes to commit"
+git push origin main || echo "Skipping push (no changes or permissions issue)"
+
+echo "🎉 Pipeline setup complete!"
+

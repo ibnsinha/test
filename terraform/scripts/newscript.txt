@@ -184,3 +184,54 @@ validate:
     expire_in: 30 days
     when: always
 
+
+
+
+====================
+
+.setup: &setup |
+  echo "🔍 Checking for existing artifacts..."
+  if [ -f terraform/terraform.tfvars ]; then
+    echo "✅ Artifacts found! Using stored files for setup."
+  else
+    echo "⚠️ No artifacts found! Running fresh setup..."
+    git clone https://gitlab.com/group/projectA.git
+    mv projectA/modules/iam_role modules/iam_role
+    mv projectA/terraform/terraform.tfvars terraform/
+    rm -rf projectA
+  fi
+
+stages:
+  - setup
+  - import
+  - apply
+  - destroy
+
+setup_pipeline:
+  stage: setup
+  script:
+    - *setup  # Calls the setup anchor
+  artifacts:
+    name: "terraform-files-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - modules/
+      - terraform/terraform.tfvars
+      - iam_role.tf
+      - "*.tf"
+    expire_in: 30 days
+    when: always
+
+terraform_apply:
+  stage: apply
+  dependencies:
+    - setup_pipeline
+  script:
+    - terraform apply -auto-approve
+
+terraform_destroy:
+  stage: destroy
+  dependencies:
+    - setup_pipeline
+  script:
+    - terraform destroy -auto-approve
+

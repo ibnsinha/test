@@ -158,3 +158,29 @@ setup_pipeline:
     expire_in: 30 days
     when: always
 
+
+
+
+======================
+
+validate:
+  stage: validate
+  script:
+    # Check if terraform.tfvars exists and if IMPORT_COMPLETED is set
+    - if [ ! -f terraform/terraform.tfvars ] || [ -z "$(grep '^IMPORT_COMPLETED' terraform/terraform.tfvars)" ] || [ "$(grep '^IMPORT_COMPLETED' terraform/terraform.tfvars | cut -d'=' -f2 | tr -d ' "')" != "true" ]; then
+        echo "⚠️ terraform.tfvars not found or IMPORT_COMPLETED not set! Cloning ProjectA...";
+        git clone https://gitlab.com/group/projectA.git;
+        mv projectA/terraform/terraform.tfvars terraform/;
+        rm -rf projectA;
+        echo "🚀 Import not completed. Proceeding with setup...";
+      else
+        echo "✅ Import already completed. Skipping setup.";
+        exit 0;
+      fi
+  artifacts:
+    name: "terraform-files-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - terraform/terraform.tfvars
+    expire_in: 30 days
+    when: always
+

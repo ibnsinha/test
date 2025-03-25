@@ -235,3 +235,20 @@ terraform_destroy:
   script:
     - terraform destroy -auto-approve
 
+
+
+=================
+
+restore_artifacts:
+  stage: setup
+  script:
+    - echo "🔍 Checking for previous successful artifacts..."
+    - curl --header "PRIVATE-TOKEN: ${GITLAB_ACCESS_TOKEN}" \
+        "https://gitlab.com/api/v4/projects/${CI_PROJECT_ID}/jobs/artifacts/main/download?job=setup_pipeline" \
+        --output terraform-artifacts.zip || echo "⚠️ No previous artifacts found"
+    - if [ -f terraform-artifacts.zip ]; then
+        unzip terraform-artifacts.zip -d .;
+      else
+        echo "⚠️ No previous artifacts available.";
+      fi
+

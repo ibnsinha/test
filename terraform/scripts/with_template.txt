@@ -1,0 +1,213 @@
+terraform.tfvars
+
+role_name = "my_iam_role"
+
+assume_role_policy = <<EOT
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "ec2.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOT
+
+managed_arns = [
+  "arn:aws:iam::aws:policy/AmazonEC2FullAccess",
+  "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+]
+
+inline_policies = {
+  "CustomInlinePolicy1" = <<EOT
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "*"
+    }
+  ]
+}
+EOT
+}
+
+permissions_boundary = "arn:aws:iam::123456789012:policy/MyBoundaryPolicy"
+
+cross_permissions = [
+  "arn:aws:iam::123456789012:role/CrossAccountRole1",
+  "arn:aws:iam::123456789012:role/CrossAccountRole2"
+]
+
+tags = {
+  Environment = "Dev"
+  Owner       = "Admin"
+}
+
+instance_profile_name = "my_instance_profile"
+
+instance_profile_tags = {
+  Project   = "MyProject"
+  ManagedBy = "Terraform"
+}
+
+
+
+
+modules/iam_role/variables.tf
+
+variable "role_name" {}
+variable "assume_role_policy" {}
+variable "managed_arns" { type = list(string) }
+variable "inline_policies" { type = map(string) }
+variable "permissions_boundary" { default = "" }
+variable "cross_permissions" { type = list(string) }
+variable "tags" { type = map(string) }
+variable "instance_profile_name" { default = "" }
+variable "instance_profile_tags" { type = map(string) }
+
+
+
+
+modules/iam_role/role.tpl
+
+resource "aws_iam_role" "${role_name}" {
+  name               = "${role_name}"
+  assume_role_policy = jsonencode(${assume_role_policy})
+
+  managed_policy_arns = ${jsonencode(managed_arns)}
+
+  % if permissions_boundary != "" {
+  permissions_boundary = "${permissions_boundary}"
+  % }
+
+  tags = ${jsonencode(tags)}
+}
+
+%{ for policy_name, policy_json in inline_policies ~}
+resource "aws_iam_role_policy" "${policy_name}" {
+  name   = "${policy_name}"
+  role   = aws_iam_role.${role_name}.name
+  policy = jsonencode(${policy_json})
+}
+%{ endfor ~}
+
+%{ for cross_role in cross_permissions ~}
+resource "aws_iam_role_policy" "cross_permission_${index(cross_permissions, cross_role)}" {
+  name   = "CrossAccountPermission-${index(cross_permissions, cross_role)}"
+  role   = aws_iam_role.${role_name}.name
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "${cross_role}"
+    }
+  ]
+}
+EOF
+}
+%{ endfor ~}
+
+% if instance_profile_name != "" {
+resource "aws_iam_instance_profile" "${instance_profile_name}" {
+  name = "${instance_profile_name}"
+  role = aws_iam_role.${role_name}.name
+  tags = ${jsonencode(instance_profile_tags)}
+}
+% }
+
+
+modules/iam_role/main.tf
+
+locals {
+  iam_role_template = templatefile("${path.module}/role.tpl", {
+    role_name            = var.role_name
+    assume_role_policy   = var.assume_role_policy
+    managed_arns         = var.managed_arns
+    inline_policies      = var.inline_policies
+    permissions_boundary = var.permissions_boundary
+    cross_permissions    = var.cross_permissions
+    tags                 = var.tags
+    instance_profile_name = var.instance_profile_name
+    instance_profile_tags = var.instance_profile_tags
+  })
+}
+
+resource "aws_iam_role" "iam_role" {
+  name               = var.role_name
+  assume_role_policy = local.iam_role_template
+}
+
+
+modules/iam_role/imports.tf
+
+import {
+  to   = aws_iam_role.iam_role
+  id   = var.role_name
+  condition = length(data.aws_iam_roles.existing.roles) > 0
+}
+
+data "aws_iam_roles" "existing" {
+  filter {
+    name   = "role-name"
+    values = [var.role_name]
+  }
+}
+
+% if instance_profile_name != "" {
+import {
+  to   = aws_iam_instance_profile.instance_profile
+  id   = var.instance_profile_name
+  condition = length(data.aws_iam_instance_profiles.existing.profiles) > 0
+}
+
+data "aws_iam_instance_profiles" "existing" {
+  filter {
+    name   = "instance-profile-name"
+    values = [var.instance_profile_name]
+  }
+}
+% }
+
+
+gitlab-ci.yml
+
+stages:
+  - setup
+  - plan
+  - apply
+  - destroy
+
+setup_pipeline:
+  stage: setup
+  script:
+    - terraform init || echo "Terraform already initialized."
+  artifacts:
+    name: "terraform-state-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - terraform.tfstate
+    expire_in: 30 days
+
+terraform_plan:
+  stage: plan
+  script:
+    - terraform plan -var-file="terraform.tfvars"
+
+terraform_apply:
+  stage: apply
+  script:
+    - terraform apply -auto-approve -var-file="terraform.tfvars"
+
+terraform_destroy:
+  stage: destroy
+  when: manual
+  script:
+    - terraform destroy -auto-approve -var-file="terraform.tfvars"
+
+

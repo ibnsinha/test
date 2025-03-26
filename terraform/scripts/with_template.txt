@@ -211,3 +211,75 @@ terraform_destroy:
     - terraform destroy -auto-approve -var-file="terraform.tfvars"
 
 
+
+
+modules/iam/outputs.tf
+
+output "iam_role_name" {
+  description = "The name of the IAM role"
+  value       = aws_iam_role.iam_role.name
+}
+
+output "iam_role_arn" {
+  description = "The ARN of the IAM role"
+  value       = aws_iam_role.iam_role.arn
+}
+
+output "iam_role_id" {
+  description = "The unique ID of the IAM role"
+  value       = aws_iam_role.iam_role.unique_id
+}
+
+output "assume_role_policy" {
+  description = "The assume role policy document attached to the IAM role"
+  value       = aws_iam_role.iam_role.assume_role_policy
+}
+
+output "managed_policy_arns" {
+  description = "List of managed policy ARNs attached to the IAM role"
+  value       = aws_iam_role.iam_role.managed_policy_arns
+}
+
+output "permissions_boundary" {
+  description = "Permissions boundary ARN (if set)"
+  value       = try(aws_iam_role.iam_role.permissions_boundary, null)
+}
+
+output "role_tags" {
+  description = "IAM role tags"
+  value       = aws_iam_role.iam_role.tags
+}
+
+# Instance Profile Outputs (Only if Instance Profile is Created)
+output "instance_profile_name" {
+  description = "The name of the instance profile (if created)"
+  value       = try(aws_iam_instance_profile.instance_profile.name, null)
+}
+
+output "instance_profile_arn" {
+  description = "The ARN of the instance profile (if created)"
+  value       = try(aws_iam_instance_profile.instance_profile.arn, null)
+}
+
+output "instance_profile_tags" {
+  description = "Tags associated with the instance profile (if created)"
+  value       = try(aws_iam_instance_profile.instance_profile.tags, null)
+}
+
+
+
+
+yml
+
+terraform_apply:
+  stage: apply
+  script:
+    - terraform apply -auto-approve -var-file="terraform.tfvars"
+    - echo "Storing Terraform Outputs..."
+    - terraform output -json > terraform_outputs.json  # Store outputs in a JSON file
+  artifacts:
+    name: "terraform-outputs-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - terraform_outputs.json  # Save the outputs for later use
+    expire_in: 30 days
+

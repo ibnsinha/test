@@ -298,3 +298,20 @@ resource "null_resource" "import_message" {
   }
 }
 
+
+iam_role
+
+module "iam_role" {
+  source = "./modules/iam_role"
+
+  role_name            = var.role_name
+  assume_role_policy   = var.assume_role_policy
+  managed_arns         = var.managed_arns
+  inline_policies      = var.inline_policies
+  permissions_boundary = var.permissions_boundary
+  cross_permissions    = var.cross_permissions
+  tags                 = var.tags
+  instance_profile_name = var.instance_profile_name
+  instance_profile_tags = var.instance_profile_tags
+}
+

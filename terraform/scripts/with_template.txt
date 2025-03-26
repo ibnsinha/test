@@ -283,3 +283,18 @@ terraform_apply:
       - terraform_outputs.json  # Save the outputs for later use
     expire_in: 30 days
 
+
+
+
+logs
+
+resource "null_resource" "import_message" {
+  provisioner "local-exec" {
+    command = "echo '✅ IAM Role ${var.role_name} imported successfully!'"
+  }
+
+  triggers = {
+    iam_role_imported = aws_iam_role.iam_role.id
+  }
+}
+

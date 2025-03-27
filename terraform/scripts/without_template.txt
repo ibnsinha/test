@@ -1,0 +1,188 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-west-2"  # Change as needed
+}
+
+# Define IAM Role
+resource "aws_iam_role" "iam_role" {
+  count = var.role_name != "" ? 1 : 0
+
+  name               = var.role_name
+  assume_role_policy = var.assume_role_policy
+
+  # Add permissions boundary if provided
+  permissions_boundary = var.permissions_boundary != "" ? var.permissions_boundary : null
+
+  tags = var.tags
+}
+
+# Attach Managed Policies (Only if managed_arns is provided)
+resource "aws_iam_role_policy_attachment" "managed_policies" {
+  for_each = length(var.managed_arns) > 0 ? toset(var.managed_arns) : {}
+
+  role       = aws_iam_role.iam_role[0].name
+  policy_arn = each.value
+}
+
+# Create Inline Policies (Only if inline_policies are provided)
+resource "aws_iam_role_policy" "inline_policies" {
+  for_each = length(var.inline_policies) > 0 ? var.inline_policies : {}
+
+  name   = each.key
+  role   = aws_iam_role.iam_role[0].name
+  policy = jsonencode(each.value)
+}
+
+# Cross-Account Permissions (Only if cross_permissions are provided)
+resource "aws_iam_role_policy" "cross_permissions" {
+  for_each = length(var.cross_permissions) > 0 ? toset(var.cross_permissions) : {}
+
+  name   = "CrossAccountPermission-${each.key}"
+  role   = aws_iam_role.iam_role[0].name
+  policy = jsonencode({
+    Version   = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = "sts:AssumeRole",
+        Resource = each.value
+      }
+    ]
+  })
+}
+
+# Create Instance Profile (Only if instance_profile_name is provided)
+resource "aws_iam_instance_profile" "instance_profile" {
+  count = var.instance_profile_name != "" ? 1 : 0
+
+  name = var.instance_profile_name
+  role = aws_iam_role.iam_role[0].name
+  tags = var.instance_profile_tags
+}
+
+
+
+
+
+
+
+
+
+
+===========
+variables
+
+
+
+variable "role_name" {
+  description = "The name of the IAM role"
+  type        = string
+  default     = ""
+}
+
+variable "assume_role_policy" {
+  description = "The assume role policy document (JSON format)"
+  type        = string
+}
+
+variable "managed_arns" {
+  description = "List of managed policy ARNs to attach"
+  type        = list(string)
+  default     = []
+}
+
+variable "inline_policies" {
+  description = "Map of inline policies"
+  type        = map(any)
+  default     = {}
+}
+
+variable "permissions_boundary" {
+  description = "Permissions boundary ARN"
+  type        = string
+  default     = ""
+}
+
+variable "cross_permissions" {
+  description = "List of cross-account role ARNs"
+  type        = list(string)
+  default     = []
+}
+
+variable "tags" {
+  description = "Tags for the IAM role"
+  type        = map(string)
+  default     = {}
+}
+
+variable "instance_profile_name" {
+  description = "Instance profile name"
+  type        = string
+  default     = ""
+}
+
+variable "instance_profile_tags" {
+  description = "Tags for the instance profile"
+  type        = map(string)
+  default     = {}
+}
+
+
+
+===============
+
+tfvars
+
+role_name           = "MyIAMRole"
+assume_role_policy  = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+managed_arns = [
+  "arn:aws:iam::aws:policy/AdministratorAccess",
+  "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+]
+
+inline_policies = {
+  "S3FullAccess" = {
+    "Version" = "2012-10-17",
+    "Statement" = [
+      {
+        "Effect"   = "Allow",
+        "Action"   = "s3:*",
+        "Resource" = "*"
+      }
+    ]
+  }
+}
+
+permissions_boundary = "arn:aws:iam::aws:policy/PowerUserAccess"
+cross_permissions   = ["arn:aws:iam::123456789012:role/CrossAccountRole"]
+tags = {
+  "Environment" = "Production"
+}
+
+instance_profile_name = "MyInstanceProfile"
+instance_profile_tags = {
+  "Name" = "MyProfile"
+}
+

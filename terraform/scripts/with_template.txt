@@ -422,3 +422,145 @@ resource "aws_iam_instance_profile" "instance_profile" {
 }
 % }
 
+
+
+
+=================
+main
+
+
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-west-2"  # Replace with your desired AWS region
+}
+
+# Define variables
+variable "role_name" {
+  description = "The name of the IAM role"
+  type        = string
+}
+
+variable "assume_role_policy" {
+  description = "The assume role policy document"
+  type        = string
+}
+
+variable "managed_arns" {
+  description = "List of managed policy ARNs to attach to the role"
+  type        = list(string)
+  default     = []
+}
+
+variable "inline_policies" {
+  description = "Map of inline policies to attach to the role"
+  type        = map(any)
+  default     = {}
+}
+
+variable "permissions_boundary" {
+  description = "ARN of the policy to use as the permissions boundary for the role"
+  type        = string
+  default     = ""
+}
+
+variable "cross_permissions" {
+  description = "List of ARNs for cross-account permissions"
+  type        = list(string)
+  default     = []
+}
+
+variable "tags" {
+  description = "Map of tags to assign to the role"
+  type        = map(string)
+  default     = {}
+}
+
+variable "instance_profile_name" {
+  description = "Name of the instance profile to create"
+  type        = string
+  default     = ""
+}
+
+variable "instance_profile_tags" {
+  description = "Map of tags to assign to the instance profile"
+  type        = map(string)
+  default     = {}
+}
+
+# Define locals
+locals {
+  iam_role_template = templatefile("${path.module}/role.tpl", {
+    role_name            = var.role_name
+    assume_role_policy   = var.assume_role_policy
+    managed_arns         = var.managed_arns
+    inline_policies      = var.inline_policies
+    permissions_boundary = var.permissions_boundary
+    cross_permissions    = var.cross_permissions
+    tags                 = var.tags
+    instance_profile_name = var.instance_profile_name
+    instance_profile_tags = var.instance_profile_tags
+  })
+}
+
+# Create IAM role
+resource "aws_iam_role" "iam_role" {
+  name               = var.role_name
+  assume_role_policy = local.iam_role_template
+}
+
+# Attach managed policies
+resource "aws_iam_role_policy_attachment" "iam_role_policy_attachment" {
+  for_each  = toset(var.managed_arns)
+  role      = aws_iam_role.iam_role.name
+  policy_arn = each.value
+}
+
+# Create inline policies
+resource "aws_iam_role_policy" "iam_role_inline_policy" {
+  for_each = var.inline_policies
+  name     = each.key
+  role     = aws_iam_role.iam_role.name
+  policy   = jsonencode(each.value)
+}
+
+# Set permissions boundary
+resource "aws_iam_role" "iam_role_with_boundary" {
+  name               = var.role_name
+  assume_role_policy = local.iam_role_template
+  permissions_boundary = var.permissions_boundary
+}
+
+# Create cross-account permissions
+resource "aws_iam_role_policy" "cross_permission" {
+  for_each = toset(var.cross_permissions)
+  name     = "CrossAccountPermission-${each.key}"
+  role     = aws_iam_role.iam_role.name
+  policy   = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "sts:AssumeRole"
+        Resource = each.value
+      }
+    ]
+  })
+}
+
+# Create instance profile
+resource "aws_iam_instance_profile" "instance_profile" {
+  count = var.instance_profile_name != "" ? 1 : 0
+  name  = var.instance_profile_name
+  role  = aws_iam_role.iam_role.name
+  tags  = var.instance_profile_tags
+}
+

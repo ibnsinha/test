@@ -315,3 +315,35 @@ module "iam_role" {
   instance_profile_tags = var.instance_profile_tags
 }
 
+
+assume_role_policy variable
+
+
+variable "assume_role_policy" {
+  description = "The policy that grants an entity permission to assume the role."
+  type        = string
+}&#8203;:contentReference[oaicite:5]{index=5}
+
+- :contentReference[oaicite:6]{index=6}&#8203;:contentReference[oaicite:7]{index=7}
+
+**Usage in Your Terraform Configuration (`main.tf`):**
+
+
+```hcl
+resource "aws_iam_role" "example" {
+  name               = "example_role"
+  assume_role_policy = var.assume_role_policy
+}&#8203;:contentReference[oaicite:8]{index=8}
+
+- :contentReference[oaicite:9]{index=9}&#8203;:contentReference[oaicite:10]{index=10}
+
+**Important Considerations:**
+
+- **JSON Formatting:** :contentReference[oaicite:11]{index=11}&#8203;:contentReference[oaicite:12]{index=12}
+
+- **Validation:** :contentReference[oaicite:13]{index=13}&#8203;:contentReference[oaicite:14]{index=14}
+
+:contentReference[oaicite:15]{index=15}&#8203;:contentReference[oaicite:16]{index=16}
+::contentReference[oaicite:17]{index=17}
+ 
+

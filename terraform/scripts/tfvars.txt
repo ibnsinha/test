@@ -1,54 +1,73 @@
-role_name = "MyIAMRole"
+import boto3
+import json
 
-assume_role_policy = <<EOT
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "ec2.amazonaws.com"
-            },
-            "Action": "sts:AssumeRole"
+def get_iam_role_details(role_name):
+    """Fetch IAM role details including assume role policy, attached policies, and inline policies."""
+    iam = boto3.client('iam')
+
+    try:
+        # Get IAM role details
+        role = iam.get_role(RoleName=role_name)
+        assume_role_policy = role['Role']['AssumeRolePolicyDocument']
+        
+        # Get attached managed policies
+        attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+        managed_policy_arns = [policy['PolicyArn'] for policy in attached_policies.get('AttachedPolicies', [])]
+
+        # Get inline policies
+        inline_policies = iam.list_role_policies(RoleName=role_name)
+        inline_policy_docs = {}
+
+        for policy_name in inline_policies.get('PolicyNames', []):
+            policy_doc = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+            inline_policy_docs[policy_name] = policy_doc['PolicyDocument']
+
+        # Get customer-managed policies
+        customer_managed_policies = {}
+        for policy_arn in managed_policy_arns:
+            policy = iam.get_policy(PolicyArn=policy_arn)
+            if policy['Policy']['Arn'].startswith(f"arn:aws:iam::{role['Role']['Arn'].split(':')[4]}:policy/"):
+                # Fetch policy document version
+                policy_version = iam.get_policy_version(
+                    PolicyArn=policy_arn,
+                    VersionId=policy['Policy']['DefaultVersionId']
+                )
+                customer_managed_policies[policy['Policy']['PolicyName']] = policy_version['PolicyVersion']['Document']
+        
+        return {
+            "role_name": role_name,
+            "assume_role_policy": json.dumps(assume_role_policy, indent=4),
+            "managed_arns": [arn for arn in managed_policy_arns if arn not in customer_managed_policies],
+            "customer_managed_policies": {k: json.dumps(v, indent=4) for k, v in customer_managed_policies.items()},
+            "inline_policies": {k: json.dumps(v, indent=4) for k, v in inline_policy_docs.items()}
         }
-    ]
-}
-EOT
+    
+    except Exception as e:
+        print(f"Error fetching IAM role details: {e}")
+        return None
 
-managed_arns = [
-    "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess",
-    "arn:aws:iam::aws:policy/IAMReadOnlyAccess"
-]
+def write_tfvars_file(role_details, output_file="terraform.tfvars"):
+    """Write the IAM role details into terraform.tfvars format."""
+    if not role_details:
+        print("No role details found. Exiting.")
+        return
+    
+    with open(output_file, "w") as f:
+        f.write(f'role_name = "{role_details["role_name"]}"\n\n')
+        f.write(f'assume_role_policy = <<EOT\n{role_details["assume_role_policy"]}\nEOT\n\n')
 
-customer_managed_policies = {
-    "MyCustomPolicy1" = <<EOT
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:*"
-            ],
-            "Resource": "*"
-        }
-    ]
-}
-EOT
-}
+        f.write(f'managed_arns = {json.dumps(role_details["managed_arns"], indent=4)}\n\n')
 
-inline_policies = {
-    "CustomInlinePolicy" = <<EOT
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": "ec2:DescribeInstances",
-            "Resource": "*"
-        }
-    ]
-}
-EOT
-}
+        f.write(f'customer_managed_policies = {json.dumps(role_details["customer_managed_policies"], indent=4)}\n\n')
+
+        f.write(f'inline_policies = {json.dumps(role_details["inline_policies"], indent=4)}\n')
+
+    print(f"terraform.tfvars file has been generated successfully as '{output_file}'.")
+
+if __name__ == "__main__":
+    role_name = input("Enter IAM role name: ")
+    role_details = get_iam_role_details(role_name)
+    
+    if role_details:
+        write_tfvars_file(role_details)
 

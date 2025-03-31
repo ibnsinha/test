@@ -376,3 +376,132 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
+=================================
+
+
+import boto3
+import json
+import argparse
+
+def get_iam_role_details(role_name):
+    """Fetch IAM role details including permission boundary, inline policies, managed policies, tags, and instance profile tags."""
+    iam = boto3.client('iam')
+
+    try:
+        # Get IAM role details
+        role = iam.get_role(RoleName=role_name)
+        assume_role_policy = role['Role']['AssumeRolePolicyDocument']
+
+        # Get permission boundary (if set)
+        permission_boundary = role["Role"].get("PermissionsBoundary", {}).get("PermissionsBoundaryArn", "")
+
+        # Get attached managed policies
+        attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+        
+        managed_arns = []
+        customer_managed_policies = {}
+
+        for policy in attached_policies.get('AttachedPolicies', []):
+            policy_arn = policy['PolicyArn']
+            policy_info = iam.get_policy(PolicyArn=policy_arn)
+
+            if ":aws:policy/" in policy_arn:
+                managed_arns.append(policy_arn)  # AWS Managed Policy
+            else:
+                policy_version = iam.get_policy_version(
+                    PolicyArn=policy_arn,
+                    VersionId=policy_info['Policy']['DefaultVersionId']
+                )
+                # Ensure the policy document is correctly formatted for Terraform
+                customer_managed_policies[policy_info['Policy']['PolicyName']] = json.dumps(policy_version['PolicyVersion']['Document'], indent=4)
+
+        # Get inline policies
+        inline_policies = iam.list_role_policies(RoleName=role_name)
+        inline_policy_docs = {}
+
+        for policy_name in inline_policies.get('PolicyNames', []):
+            policy_doc = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+            inline_policy_docs[policy_name] = policy_doc['PolicyDocument']
+
+        # Get tags
+        tags_response = iam.list_role_tags(RoleName=role_name)
+        tags = {tag["Key"]: tag["Value"] for tag in tags_response.get("Tags", [])}
+
+        # Get instance profile (if it exists)
+        instance_profiles = iam.list_instance_profiles_for_role(RoleName=role_name)
+        instance_profile_name = ""
+        instance_profile_tags = {}
+
+        if instance_profiles["InstanceProfiles"]:
+            instance_profile_name = instance_profiles["InstanceProfiles"][0]["InstanceProfileName"]
+            # Fetch instance profile tags if they exist
+            instance_profile_arn = instance_profiles["InstanceProfiles"][0]["Arn"]
+            ec2 = boto3.client('ec2')
+            tags_response = ec2.describe_tags(Filters=[{
+                'Name': 'resource-id',
+                'Values': [instance_profile_arn]
+            }])
+            instance_profile_tags = {tag['Key']: tag['Value'] for tag in tags_response.get('Tags', [])}
+
+        return {
+            "role_name": role_name,
+            "assume_role_policy": json.dumps(assume_role_policy, indent=4),
+            "permission_boundary": permission_boundary,  # Permission boundary
+            "managed_arns": managed_arns,  # AWS-managed policies
+            "customer_managed_policies": customer_managed_policies,  # Custom-managed policies
+            "inline_policies": inline_policy_docs,  # Inline policies
+            "tags": tags,  # Tags for the IAM role
+            "instance_profile_name": instance_profile_name,  # Instance Profile Name (if exists)
+            "instance_profile_tags": instance_profile_tags  # Instance Profile Tags (if any)
+        }
+    
+    except Exception as e:
+        print(f"Error fetching IAM role details: {e}")
+        return None
+
+def write_tfvars_file(role_details, output_file="terraform.tfvars"):
+    """Write IAM role details into terraform.tfvars format."""
+    if not role_details:
+        print("No role details found. Exiting.")
+        return
+    
+    with open(output_file, "w") as f:
+        f.write(f'role_name = "{role_details["role_name"]}"\n\n')
+        f.write(f'assume_role_policy = <<EOT\n{role_details["assume_role_policy"]}\nEOT\n\n')
+
+        f.write(f'permission_boundary = "{role_details["permission_boundary"]}"\n\n')
+
+        f.write(f'managed_arns = {json.dumps(role_details["managed_arns"], indent=4)}\n\n')
+
+        f.write(f'tags = {json.dumps(role_details["tags"], indent=4)}\n\n')
+
+        f.write(f'instance_profile_name = "{role_details["instance_profile_name"]}"\n\n')
+
+        f.write(f'instance_profile_tags = {json.dumps(role_details["instance_profile_tags"], indent=4)}\n\n')
+
+        # Write customer-managed policies
+        for policy_name, policy_json in role_details["customer_managed_policies"].items():
+            f.write(f'customer_managed_policy_{policy_name} = <<EOT\n{policy_json}\nEOT\n\n')
+
+        # Write inline policies
+        for policy_name, policy_json in role_details["inline_policies"].items():
+            f.write(f'inline_policy_{policy_name} = <<EOT\n{json.dumps(policy_json, indent=4)}\nEOT\n\n')
+
+    print(f"terraform.tfvars file has been generated successfully as '{output_file}'.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch IAM role details and generate terraform.tfvars")
+    parser.add_argument("role_name", help="The name of the IAM role")
+    args = parser.parse_args()
+
+    role_details = get_iam_role_details(args.role_name)
+    
+    if role_details:
+        write_tfvars_file(role_details)
+

@@ -34,3 +34,95 @@ resource "aws_iam_role_policy_attachment" "customer_policy_attachments" {
   role       = aws_iam_role.iam_role["enabled"].name
 }
 
+
+
+count approach
+=================
+
+
+variable "customer_managed_policies" {
+  description = "A map of IAM policies with multiple statements"
+  type = map(object({
+    name        = string
+    description = string
+    statements  = list(object({
+      Effect   = string
+      Action   = list(string)
+      Resource = string
+      Sid      = optional(string)
+    }))
+  }))
+}
+
+
+
+resource "aws_iam_policy" "customer_managed" {
+  count       = length(var.customer_managed_policies)
+  name        = values(var.customer_managed_policies)[count.index].name
+  description = values(var.customer_managed_policies)[count.index].description
+
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = values(var.customer_managed_policies)[count.index].statements
+  })
+}
+
+
+
+resource "aws_iam_role_policy_attachment" "customer_policy_attachments" {
+  count      = length(var.customer_managed_policies)
+  policy_arn = aws_iam_policy.customer_managed[count.index].arn
+  role       = aws_iam_role.iam_role["enabled"].name
+}
+
+
+
+
+example tfvar
+
+customer_managed_policies = {
+  "sinha-test-aug-n-nitcoredev-iamp-access-policy-rds-nitcore" = {
+    name        = "sinha-test-aug-n-nitcoredev-iamp-access-policy-rds-nitcore"
+    description = "IAM policy for accessing RDS in NitCore account"
+    statements = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "kms:GenerateDataKey",
+          "kms:DescribeKey"
+        ]
+        Resource = "arn:aws-us-gov:kms:us-gov-west-1:394806832863:key/331ed000-d078-4b1f-85a5-0b0017b3d10d"
+        Sid      = "AccessDbKMSKey"
+      }
+    ]
+  },
+
+  "sinha-test-aug-n-nitcoredev-iamp-gitlab-runner" = {
+    name        = "sinha-test-aug-n-nitcoredev-iamp-gitlab-runner"
+    description = "IAM policy for GitLab runner"
+    statements = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "ssm:List*",
+          "ssm:AddTagsToResource",
+          "ssm:*Parameter*",
+          "iam:GetGroupPolicy",
+          "iam:UpdateRoleDescription",
+          "iam:UpdateRole"
+        ]
+        Resource = "*"
+        Sid      = "AllowSSMAndIAM"
+      },
+      {
+        Effect   = "Allow"
+        Action   = [
+          "cloudformation:ValidateTemplate"
+        ]
+        Resource = "*"
+        Sid      = "AllowCFValidation"
+      }
+    ]
+  }
+}
+

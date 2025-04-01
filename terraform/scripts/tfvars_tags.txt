@@ -636,3 +636,10 @@ if __name__ == "__main__":
     if role_details:
         write_tfvars_file(role_details)
 
+
+
+
+
+=============
+export ROLE_NAME=$(grep "^role_name" terraform.tfvars | tr -d '\t\r' | sed -E 's/role_name[[:space:]]*=[[:space:]]*"?(.*)"?/\1/' | tr -d '[:space:]$')
+

@@ -1,0 +1,100 @@
+import boto3
+import json
+import argparse
+
+def get_iam_role_details(role_name):
+    """Fetch IAM role details including customer-managed policies formatted correctly."""
+    iam = boto3.client('iam')
+
+    try:
+        # Get IAM role details
+        role = iam.get_role(RoleName=role_name)
+        assume_role_policy = role['Role']['AssumeRolePolicyDocument']
+
+        # Get attached managed policies
+        attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+        
+        managed_arns = []
+        customer_managed_policies = {}
+
+        for policy in attached_policies.get('AttachedPolicies', []):
+            policy_arn = policy['PolicyArn']
+            policy_info = iam.get_policy(PolicyArn=policy_arn)
+
+            if ":aws:policy/" in policy_arn:
+                managed_arns.append(policy_arn)  # AWS Managed Policy
+            else:
+                # Customer Managed Policy - Fetch policy details
+                policy_version = iam.get_policy_version(
+                    PolicyArn=policy_arn,
+                    VersionId=policy_info['Policy']['DefaultVersionId']
+                )
+
+                # Extract policy details
+                policy_name = policy_info['Policy']['PolicyName']
+                policy_description = policy_info['Policy'].get('Description', '')
+                policy_statements = policy_version['PolicyVersion']['Document'].get('Statement', [])
+
+                # Format policy for Terraform
+                customer_managed_policies[policy_name] = {
+                    "name": policy_name,
+                    "description": policy_description,
+                    "statements": policy_statements
+                }
+
+        return {
+            "role_name": role_name,
+            "assume_role_policy": json.dumps(assume_role_policy, indent=4),
+            "managed_arns": managed_arns,  # AWS-managed policies
+            "customer_managed_policies": customer_managed_policies,  # Corrected format
+        }
+    
+    except Exception as e:
+        print(f"Error fetching IAM role details: {e}")
+        return None
+
+def write_tfvars_file(role_details, output_file="terraform.tfvars"):
+    """Write IAM role details into terraform.tfvars format."""
+    if not role_details:
+        print("No role details found. Exiting.")
+        return
+    
+    with open(output_file, "w") as f:
+        f.write(f'role_name = "{role_details["role_name"]}"\n\n')
+        f.write(f'assume_role_policy = <<EOT\n{role_details["assume_role_policy"]}\nEOT\n\n')
+
+        f.write(f'managed_arns = {json.dumps(role_details["managed_arns"], indent=4)}\n\n')
+
+        # Write customer-managed policies as structured map
+        f.write('customer_managed_policies = {\n')
+        for policy_name, policy_data in role_details["customer_managed_policies"].items():
+            f.write(f'  "{policy_name}" = {{\n')
+            f.write(f'    name        = "{policy_data["name"]}"\n')
+            f.write(f'    description = "{policy_data["description"]}"\n')
+            f.write(f'    statements = [\n')
+
+            for statement in policy_data["statements"]:
+                f.write("      {\n")
+                for key, value in statement.items():
+                    if isinstance(value, list):
+                        f.write(f'        {key} = {json.dumps(value, indent=4)}\n')
+                    else:
+                        f.write(f'        {key} = "{value}"\n')
+                f.write("      },\n")
+
+            f.write("    ]\n")
+            f.write("  },\n")
+        f.write('}\n\n')
+
+    print(f"terraform.tfvars file has been generated successfully as '{output_file}'.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch IAM role details and generate terraform.tfvars")
+    parser.add_argument("role_name", help="The name of the IAM role")
+    args = parser.parse_args()
+
+    role_details = get_iam_role_details(args.role_name)
+    
+    if role_details:
+        write_tfvars_file(role_details)
+

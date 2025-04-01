@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Ensure Terraform is initialized
+terraform init -input=false
+
+# Loop through the customer_managed_policies map to generate terraform import commands
+for policy_key in $(terraform console -no-color <<EOF
+keys(var.customer_managed_policies)
+EOF
+); do
+  # Extract the ARN for the current policy using terraform console
+  policy_arn=$(terraform console -no-color <<EOF
+var.customer_managed_policies["$policy_key"].arn
+EOF
+  )
+
+  # Check if policy_arn is empty (error check)
+  if [ -z "$policy_arn" ]; then
+    echo "Error: ARN for policy $policy_key is empty!"
+    continue
+  fi
+
+  # Generate terraform import command for each policy
+  echo "Importing policy $policy_arn..."
+  terraform import aws_iam_policy.customer_managed["$policy_key"] "$policy_arn"
+done
+

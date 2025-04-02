@@ -102,3 +102,32 @@ else
   echo "✅ All attached policies imported successfully!"
 fi
 
+
+
+
+=============================
+
+#!/bin/bash
+
+role_name="my-iam-role"
+
+# Fetch only customer-managed policy ARNs
+policy_arns=$(aws iam list-attached-role-policies --role-name "$role_name" \
+  --query "AttachedPolicies[?starts_with(PolicyArn, 'arn:aws:iam::')].PolicyArn" --output text)
+
+# Check if any customer-managed policies are attached
+if [ -z "$policy_arns" ]; then
+  echo "⚠️ No customer-managed policies found for IAM role '$role_name'."
+else
+  echo "✅ Found customer-managed policies for IAM role '$role_name'. Importing..."
+  
+  index=0
+  for policy_arn in $policy_arns; do
+    echo "🔄 Importing policy attachment: $policy_arn"
+    terraform import aws_iam_role_policy_attachment.customer_policy_attachments["$index"] "$role_name/$policy_arn"
+    index=$((index + 1))
+  done
+
+  echo "✅ All customer-managed policies imported successfully!"
+fi
+

@@ -131,3 +131,15 @@ else
   echo "✅ All customer-managed policies imported successfully!"
 fi
 
+
+
+
+
+
+
+
+
+===========
+aws iam list-attached-role-policies --role-name my-iam-role \
+  --query "AttachedPolicies[?contains(PolicyArn, 'arn:aws:iam::') && !contains(PolicyArn, 'arn:aws:iam::aws:policy')].PolicyArn" --output text
+

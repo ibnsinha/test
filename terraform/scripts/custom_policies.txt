@@ -143,3 +143,79 @@ fi
 aws iam list-attached-role-policies --role-name my-iam-role \
   --query "AttachedPolicies[?contains(PolicyArn, 'arn:aws:iam::') && !contains(PolicyArn, 'arn:aws:iam::aws:policy')].PolicyArn" --output text
 
+
+
+
+
+====================
+
+import boto3
+import json
+import re
+
+# Initialize AWS IAM client
+iam_client = boto3.client('iam')
+
+def read_tfvars(file_path="terraform.tfvars"):
+    """Read terraform.tfvars and extract the IAM role name."""
+    role_name = None
+    with open(file_path, "r") as file:
+        for line in file:
+            match = re.match(r'^\s*iam_role_name\s*=\s*"([^"]+)"', line)
+            if match:
+                role_name = match.group(1)
+                break
+    if not role_name:
+        raise ValueError("⚠️ 'iam_role_name' not found in terraform.tfvars.")
+    return role_name
+
+def get_customer_managed_policies(role_name):
+    """Retrieve only customer-managed policies (exclude AWS-managed ones)."""
+    response = iam_client.list_attached_role_policies(RoleName=role_name)
+    
+    # Extract policy ARNs
+    all_policies = response.get('AttachedPolicies', [])
+    
+    # Filter out AWS-managed policies (those starting with 'arn:aws:iam::aws:policy/')
+    customer_managed_policies = [
+        policy['PolicyArn'] for policy in all_policies 
+        if not policy['PolicyArn'].startswith('arn:aws:iam::aws:policy/')
+    ]
+    
+    return customer_managed_policies
+
+def save_policies_to_file(policies, output_file="custom_policy_arns.json"):
+    """Save the extracted policy ARNs to a JSON file."""
+    with open(output_file, "w") as file:
+        json.dump(policies, file, indent=4)
+    print(f"✅ Customer-managed policy ARNs saved to {output_file}")
+
+# Main execution
+try:
+    role_name = read_tfvars()
+    print(f"ℹ️ IAM Role Name Found: {role_name}")
+
+    policies = get_customer_managed_policies(role_name)
+    save_policies_to_file(policies)
+
+except Exception as e:
+    print(f"❌ Error: {e}")
+
+
+
+
+
+
+stages:
+  - import
+
+import_policies:
+  stage: import
+  script:
+    - python extract_policies.py  # Run the Python script
+    - |
+      for policy_arn in $(jq -r '.[]' custom_policy_arns.json); do
+        echo "Importing policy: $policy_arn"
+        terraform import aws_iam_role_policy_attachment.customer_policy_attachments["$CI_JOB_ID"] "$role_name/$policy_arn"
+      done
+

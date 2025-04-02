@@ -25,3 +25,43 @@ EOF
   terraform import aws_iam_policy.customer_managed["$policy_key"] "$policy_arn"
 done
 
+
+==============
+
+
+#!/bin/bash
+
+# Define the IAM role name
+role_name="my-iam-role"
+
+# Check if the role exists (assuming role_exists is a variable that stores true/false)
+if [ "$role_exists" == "true" ]; then
+  echo "IAM Role $role_name exists. Proceeding with import..."
+
+  # Get the list of attached policy ARNs to the IAM role (if any)
+  policy_arns=$(aws iam list-attached-role-policies --role-name "$role_name" | jq -r '.AttachedPolicies[].PolicyArn')
+
+  # Check if there are any attached policies
+  if [ -n "$policy_arns" ]; then
+    echo "The IAM role has attached policies. Importing role and policies..."
+
+    # Import the IAM role
+    terraform import aws_iam_role.my_role_name "$role_name"
+    
+    # Initialize an index counter for policy imports
+    index=0
+
+    # Loop through each policy ARN and import the attached policy
+    for policy_arn in $policy_arns; do
+      echo "Importing policy attachment: $policy_arn"
+      terraform import aws_iam_role_policy_attachment.my_role_policy_attachment["$index"] "$role_name-$policy_arn"
+      index=$((index + 1))
+    done
+  else
+    echo "The IAM role has no attached policies. Only importing the IAM role."
+    terraform import aws_iam_role.my_role_name "$role_name"
+  fi
+else
+  echo "IAM Role $role_name does not exist. Skipping import."
+fi
+

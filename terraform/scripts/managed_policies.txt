@@ -1,0 +1,22 @@
+import boto3
+import json
+
+iam = boto3.client("iam")
+
+def get_managed_policy_arns(role_name):
+    """Fetch AWS managed policies attached to the IAM role."""
+    response = iam.list_attached_role_policies(RoleName=role_name)
+    attached_policies = response.get("AttachedPolicies", [])
+
+    # Only keep AWS-managed policies (those that start with 'arn:aws:iam::aws:policy/')
+    managed_policy_arns = [
+        policy["PolicyArn"]
+        for policy in attached_policies
+        if policy["PolicyArn"].startswith("arn:aws:iam::aws:policy/")
+    ]
+    return managed_policy_arns
+
+def write_managed_policies_to_json(arns, output_file="managed_policy_arns.json"):
+    with open(output_file, "w") as f:
+        json.dump(arns, f)
+

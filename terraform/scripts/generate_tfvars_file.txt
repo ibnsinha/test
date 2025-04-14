@@ -1,0 +1,69 @@
+#!/bin/bash
+
+ACCOUNTS_DIR="./accounts"
+OUTPUT_ROOT="./terraform_files"
+LOG_FILE="./tfvars_generation.log"
+
+IAM_ROLE_SUFFIXES=(
+  "read-only-runner-role"
+  "basic-runner-role"
+  "elevated-iam-runner-role"
+  "elevated-infra-runner-role"
+)
+
+# Start log
+echo "==== Starting tfvars generation at $(date) ====" | tee "$LOG_FILE"
+
+# Loop through each account directory
+for account_path in "$ACCOUNTS_DIR"/*; do
+    if [ -d "$account_path" ]; then
+        account_json="$account_path/account.json"
+
+        if [ ! -f "$account_json" ]; then
+            echo "[WARN] Skipping: No account.json found in $account_path" | tee -a "$LOG_FILE"
+            continue
+        fi
+
+        account_alias=$(jq -r '.ACCOUNT_ALIAS' "$account_json")
+        account_id=$(jq -r '.ACCOUNT_ID' "$account_json")
+
+        if [[ -z "$account_alias" || -z "$account_id" ]]; then
+            echo "[ERROR] Skipping: Missing ACCOUNT_ALIAS or ACCOUNT_ID in $account_json" | tee -a "$LOG_FILE"
+            continue
+        fi
+
+        export AWS_PROFILE="${account_alias}_${account_id}_HE-NT-ReadOnly"
+        echo "------------------------------------------------------------" | tee -a "$LOG_FILE"
+        echo "[INFO] Processing account: $account_alias ($account_id)" | tee -a "$LOG_FILE"
+        echo "[INFO] Using AWS_PROFILE=$AWS_PROFILE" | tee -a "$LOG_FILE"
+
+        for suffix in "${IAM_ROLE_SUFFIXES[@]}"; do
+            iam_role_name="${account_alias}-${suffix}"
+            target_dir="$OUTPUT_ROOT/$account_alias/$suffix"
+            mkdir -p "$target_dir"
+            output_file="$target_dir/terraform.tfvars"
+
+            echo "[INFO]   Generating tfvars for IAM role: $iam_role_name" | tee -a "$LOG_FILE"
+            python3 generate_iam_tfvars.py "$iam_role_name"
+
+            if [ -f terraform.tfvars ]; then
+                mv terraform.tfvars "$output_file"
+                echo "[SUCCESS] Saved: $output_file" | tee -a "$LOG_FILE"
+
+                {
+                    echo ""
+                    echo "aws_region = \"us-west-1\""
+                    echo "target_account_id = \"$account_id\""
+                    echo "target_role_name = \"${account_alias}-elevated-iam-runner-role\""
+                } >> "$output_file"
+
+                echo "[INFO]   Appended region/account metadata" | tee -a "$LOG_FILE"
+            else
+                echo "[ERROR]  Failed to generate tfvars for: $iam_role_name" | tee -a "$LOG_FILE"
+            fi
+        done
+    fi
+done
+
+echo "==== tfvars generation completed at $(date) ====" | tee -a "$LOG_FILE"
+

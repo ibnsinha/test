@@ -151,3 +151,172 @@ done
 
 echo "==== tfvars generation completed at $(date) ====" | tee -a "$LOG_FILE"
 
+
+
+==========================
+
+
+
+python version
+
+=======================
+
+
+import os
+import json
+import boto3
+from pathlib import Path
+from datetime import datetime
+
+ACCOUNTS_DIR = "./accounts"
+OUTPUT_ROOT = "./terraform_files"
+LOG_FILE = "./tfvars_generation.log"
+IAM_ROLE_SUFFIXES = [
+    "read-only-runner-role",
+    "basic-runner-role",
+    "elevated-iam-runner-role",
+    "elevated-infra-runner-role"
+]
+
+def log(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {message}"
+    print(line)
+    with open(LOG_FILE, "a") as f:
+        f.write(line + "\n")
+
+def fetch_iam_role(role_name):
+    iam = boto3.client('iam')
+    try:
+        role = iam.get_role(RoleName=role_name)
+        assume_role_policy = role['Role']['AssumeRolePolicyDocument']
+        permissions_boundary = role['Role'].get('PermissionsBoundary', {}).get('PermissionsBoundaryArn', "")
+        attached_policies = iam.list_attached_role_policies(RoleName=role_name)
+
+        managed_arns = []
+        customer_managed_policies = {}
+
+        for policy in attached_policies.get('AttachedPolicies', []):
+            policy_arn = policy['PolicyArn']
+            policy_info = iam.get_policy(PolicyArn=policy_arn)
+
+            if "aws:policy" in policy_arn:
+                managed_arns.append(policy_arn)
+            else:
+                policy_version = iam.get_policy_version(
+                    PolicyArn=policy_arn,
+                    VersionId=policy_info['Policy']['DefaultVersionId']
+                )
+                policy_name = policy_info['Policy']['PolicyName']
+                statements = policy_version['PolicyVersion']['Document'].get('Statement', [])
+                for s in statements:
+                    if isinstance(s.get("Action"), str):
+                        s["Action"] = [s["Action"]]
+                    if isinstance(s.get("Resource"), str):
+                        s["Resource"] = [s["Resource"]]
+                customer_managed_policies[policy_name] = {
+                    "name": policy_name,
+                    "statements": statements
+                }
+
+        inline_policies = iam.list_role_policies(RoleName=role_name)
+        inline_docs = {}
+        for name in inline_policies.get('PolicyNames', []):
+            inline_doc = iam.get_role_policy(RoleName=role_name, PolicyName=name)
+            inline_docs[name] = json.dumps(inline_doc['PolicyDocument'], indent=4)
+
+        tags = iam.list_role_tags(RoleName=role_name).get("Tags", [])
+        tag_list = [{tag["Key"]: tag["Value"]} for tag in tags]
+
+        instance_profiles = iam.list_instance_profiles_for_role(RoleName=role_name)
+        instance_profile_name = ""
+        instance_profile_tags = []
+        if instance_profiles["InstanceProfiles"]:
+            instance_profile_name = instance_profiles["InstanceProfiles"][0]["InstanceProfileName"]
+            profile_tags = iam.list_instance_profile_tags(InstanceProfileName=instance_profile_name).get("Tags", [])
+            instance_profile_tags = [{tag["Key"]: tag["Value"]} for tag in profile_tags]
+
+        return {
+            "role_name": role_name,
+            "assume_role_policy": json.dumps(assume_role_policy, indent=4),
+            "managed_arns": managed_arns,
+            "customer_managed_policies": customer_managed_policies,
+            "inline_policies": inline_docs,
+            "permissions_boundary": permissions_boundary,
+            "tags": tag_list,
+            "instance_profile_name": instance_profile_name,
+            "instance_profile_tags": instance_profile_tags
+        }
+    except Exception as e:
+        log(f"[ERROR] fetch_iam_role failed for {role_name}: {e}")
+        return None
+
+def write_tfvars_file(role_details, output_path, region, account_id, account_alias):
+    with open(output_path, "w") as f:
+        f.write(f'role_name = "{role_details["role_name"]}"\n\n')
+        f.write(f'assume_role_policy = <<EOT\n{role_details["assume_role_policy"]}\nEOT\n\n')
+        f.write(f'managed_arns = {json.dumps(role_details["managed_arns"], indent=4)}\n\n')
+        f.write(f'customer_managed_policies = {{\n')
+        for name, data in role_details["customer_managed_policies"].items():
+            f.write(f'  "{name}" = {{\n')
+            f.write(f'    name = "{data["name"]}"\n')
+            f.write(f'    statements = [\n')
+            for stmt in data["statements"]:
+                f.write('      {\n')
+                for k, v in stmt.items():
+                    if isinstance(v, list):
+                        f.write(f'        {k} = {json.dumps(v)}\n')
+                    else:
+                        f.write(f'        {k} = "{v}"\n')
+                f.write('      },\n')
+            f.write('    ]\n  }\n')
+        f.write('}\n\n')
+        f.write(f'permissions_boundary = "{role_details["permissions_boundary"]}"\n\n')
+        f.write(f'instance_profile_name = "{role_details["instance_profile_name"]}"\n\n')
+        f.write(f'tags = {json.dumps(role_details["tags"], indent=4)}\n\n')
+        f.write(f'instance_profile_tags = {json.dumps(role_details["instance_profile_tags"], indent=4)}\n\n')
+        for name, doc in role_details["inline_policies"].items():
+            f.write(f'inline_policy_{name} = <<EOT\n{doc}\nEOT\n\n')
+        f.write(f'aws_region = "{region}"\n')
+        f.write(f'target_account_id = "{account_id}"\n')
+        f.write(f'target_role_name = "{account_alias}-elevated-iam-runner-role"\n')
+
+Path(LOG_FILE).write_text(f"==== Starting tfvars generation at {datetime.now()} ====\n")
+
+for account_path in Path(ACCOUNTS_DIR).iterdir():
+    if not account_path.is_dir():
+        continue
+
+    json_file = account_path / "account.json"
+    if not json_file.exists():
+        log(f"[WARN] No account.json found in {account_path}")
+        continue
+
+    try:
+        with open(json_file) as f:
+            account_data = json.load(f)
+            account_alias = account_data["ACCOUNT_ALIAS"]
+            account_id = account_data["ACCOUNT_ID"]
+    except Exception as e:
+        log(f"[ERROR] Failed to load {json_file}: {e}")
+        continue
+
+    os.environ["AWS_PROFILE"] = f"{account_alias}_{account_id}_HE-NT-ReadOnly"
+    log(f"------------------------------------------------------------")
+    log(f"[INFO] Processing {account_alias} ({account_id})")
+
+    for suffix in IAM_ROLE_SUFFIXES:
+        role_name = f"{account_alias}-{suffix}"
+        output_dir = Path(OUTPUT_ROOT) / account_alias / suffix
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / "terraform.tfvars"
+
+        log(f"[INFO] Generating: {role_name}")
+        role_data = fetch_iam_role(role_name)
+        if not role_data:
+            continue
+
+        write_tfvars_file(role_data, output_file, "us-west-1", account_id, account_alias)
+        log(f"[SUCCESS] Wrote: {output_file}")
+
+log(f"==== tfvars generation completed at {datetime.now()} ====")

@@ -1,0 +1,74 @@
+import boto3
+from pathlib import Path
+from datetime import datetime
+
+# Define your parameters
+OUTPUT_DIR = Path("./policy_reports")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_FILE = OUTPUT_DIR / "AWSConfigRole_entities_report.txt"
+POLICY_NAME = "AWSConfigRole"
+PROFILE = "default"  # Change this if using specific AWS profiles
+
+
+def log(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}")
+
+
+# Function to check policy and attached entities
+def find_policy_and_attached_entities(policy_name, profile):
+    session = boto3.Session(profile_name=profile)
+    iam_client = session.client('iam')
+
+    paginator = iam_client.get_paginator('list_policies')
+    policy_arn = None
+
+    # Check if policy exists
+    for page in paginator.paginate(Scope='Local'):
+        for policy in page['Policies']:
+            if policy['PolicyName'] == policy_name:
+                policy_arn = policy['Arn']
+                log(f'Policy found: {policy_name} - ARN: {policy_arn}')
+                break
+        if policy_arn:
+            break
+
+    if not policy_arn:
+        log(f"Policy '{policy_name}' does not exist.")
+        return []
+
+    entities = iam_client.list_entities_for_policy(PolicyArn=policy_arn)
+    attached_entities = []
+
+    for entity_type, key in [('Group', 'PolicyGroups'), ('User', 'PolicyUsers'), ('Role', 'PolicyRoles')]:
+        for entity in entities[key]:
+            name = entity.get('GroupName') or entity.get('UserName') or entity.get('RoleName')
+            attached_entities.append((entity_type, name))
+
+    if attached_entities:
+        log(f"Attached entities found for policy '{policy_name}':")
+        for entity_type, entity_name in attached_entities:
+            log(f' - {entity_type}: {entity_name}')
+    else:
+        log("No entities attached to this policy.")
+
+    return attached_entities
+
+
+# Write the attached entities to a report file
+def write_report_file(attached_entities, output_path, policy_name):
+    with open(output_path, "w") as f:
+        f.write(f"Attached entities for policy '{policy_name}':\n")
+        if attached_entities:
+            for entity_type, entity_name in attached_entities:
+                f.write(f' - {entity_type}: {entity_name}\n')
+        else:
+            f.write("No entities attached to this policy.\n")
+
+
+# Main execution logic
+if __name__ == "__main__":
+    log(f"Starting check for policy '{POLICY_NAME}'")
+    entities = find_policy_and_attached_entities(POLICY_NAME, PROFILE)
+    write_report_file(entities, OUTPUT_FILE, POLICY_NAME)
+    log(f"Report generated: {OUTPUT_FILE}")

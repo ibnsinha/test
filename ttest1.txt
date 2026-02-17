@@ -1,0 +1,42 @@
+# EC2 Account Sharing Controls Module
+
+## Overview
+
+This Terraform module manages AWS EC2 account-level settings that restrict
+public sharing of:
+
+- Amazon Machine Images (AMIs)
+- EBS Snapshots
+
+These settings are applied at the **AWS Account + Region** level.
+
+This module enforces security guardrails to prevent unintended public exposure
+of EC2 resources.
+
+---
+
+## Resources Managed
+
+- `aws_ec2_image_block_public_access`
+- `aws_ebs_snapshot_block_public_access`
+
+---
+
+## Important Notes
+
+- These settings are **regional**. The module must be applied in each AWS region.
+- Enabling `block-all-sharing` or `block-new-sharing` does NOT automatically
+  remediate existing public snapshots or AMIs.
+- This module manages account-level configuration only.
+
+---
+
+## Usage
+
+```hcl
+module "ec2_account_sharing_controls" {
+  source = "./modules/ec2_account_sharing_controls"
+
+  ami_block_public_access_state          = "block-new-sharing"
+  ebs_snapshot_block_public_access_state = "block-all-sharing"
+}

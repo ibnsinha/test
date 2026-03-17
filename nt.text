@@ -1,0 +1,36 @@
+Upcoming Change: EC2 Public AMI and EBS Snapshot Sharing Restrictions
+
+What is happening?
+
+Between Nov 6 – Nov 10, the Cloud Environment Engineering team will implement changes to restrict public sharing of EC2 resources across our AWS accounts.
+
+The following controls will be enforced:
+	•	Amazon Machine Images (AMIs): Public sharing will be restricted
+	•	EBS Snapshots: Public sharing will be restricted
+
+⸻
+
+What is the impact?
+	•	New AMIs and EBS snapshots cannot be shared publicly
+	•	Any existing public sharing configurations may be restricted or require review
+	•	Workloads that rely on publicly shared AMIs or snapshots may be impacted
+
+⸻
+
+What action is required?
+	•	Please review your workloads and ensure they do not depend on publicly shared AMIs or EBS snapshots
+	•	If public sharing is required for a valid business case, please contact the Cloud Environment Engineering team in advance
+	•	Ensure appropriate access controls (IAM roles, private sharing) are used instead
+
+⸻
+
+Additional Information
+	•	These changes are being implemented as part of our ongoing security and compliance improvements
+	•	Details and documentation can be found here: (add link if available)
+	•	Change request reference(s): (to be updated)
+
+⸻
+
+Questions / Support
+
+If you have any questions or anticipate any impact, please reach out to the Cloud Environment Engineering team.

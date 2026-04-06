@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowStepFunctionsBasicConsoleAccess",
+      "Effect": "Allow",
+      "Action": [
+        "states:ListStateMachines",
+        "states:DescribeStateMachine",
+        "states:ListExecutions",
+        "states:DescribeExecution",
+        "states:CreateStateMachine",
+        "states:UpdateStateMachine",
+        "states:StartExecution",
+        "states:StopExecution"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowPassRoleForStateMachineCreation",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<STEP_FUNCTIONS_EXECUTION_ROLE>"
+    }
+  ]
+}
